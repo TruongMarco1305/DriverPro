@@ -31,7 +31,8 @@ let package = Package(
         .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"]),
         .library(name: "DPDatabase", targets: ["DPDatabase"]),
         .library(name: "DPBookmarks", targets: ["DPBookmarks"]),
-        .library(name: "DPTransfer", targets: ["DPTransfer"])
+        .library(name: "DPTransfer", targets: ["DPTransfer"]),
+        .library(name: "DPServices", targets: ["DPServices"])
     ],
 
     dependencies: [
@@ -51,7 +52,7 @@ let package = Package(
         // satisfy. A library rather than a test target because two different test targets import it.
         .target(
             name: "DPTestSupport",
-            dependencies: ["DPCore", "DPTransfer"],
+            dependencies: ["DPCore", "DPTransfer", "DPCredentials"],
             swiftSettings: swiftSettings
         ),
         .testTarget(
@@ -122,9 +123,24 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
 
+        // The composition root: the only target that knows which protocols exist and how the parts
+        // fit together. Nothing imports it except the app.
+        .target(
+            name: "DPServices",
+            dependencies: ["DPCore", "DPCredentials", "DPBookmarks", "DPDatabase", "DPTransfer",
+                           "DPProtocolSFTP"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPServicesTests",
+            dependencies: ["DPServices", "DPCore", "DPCredentials", "DPTestSupport"],
+            swiftSettings: swiftSettings
+        ),
+
         .testTarget(
             name: "DPProtocolSFTPTests",
-            dependencies: ["DPProtocolSFTP", "DPCore", "DPCredentials", "DPTestSupport", "DPTransfer"],
+            dependencies: ["DPProtocolSFTP", "DPCore", "DPCredentials", "DPTestSupport", "DPTransfer",
+                           "DPServices", "DPBookmarks", "DPDatabase"],
             swiftSettings: swiftSettings
         )
     ]

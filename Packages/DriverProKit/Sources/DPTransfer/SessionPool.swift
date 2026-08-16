@@ -65,7 +65,7 @@ public actor SessionPool {
     /// - Throws: Connection failures, or whatever `body` throws.
     public func withSession<T: Sendable>(
         for host: RemoteHost,
-        _ body: (any Session) async throws -> T
+        _ body: sending (any Session) async throws -> T
     ) async throws -> T {
         let session = try await borrow(host)
 
