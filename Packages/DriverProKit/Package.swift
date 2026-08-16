@@ -124,7 +124,7 @@ let package = Package(
 
         .testTarget(
             name: "DPProtocolSFTPTests",
-            dependencies: ["DPProtocolSFTP", "DPCore", "DPCredentials", "DPTestSupport"],
+            dependencies: ["DPProtocolSFTP", "DPCore", "DPCredentials", "DPTestSupport", "DPTransfer"],
             swiftSettings: swiftSettings
         )
     ]
