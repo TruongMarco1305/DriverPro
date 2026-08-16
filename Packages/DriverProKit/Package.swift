@@ -30,6 +30,7 @@ let package = Package(
         .library(name: "DPCredentials", targets: ["DPCredentials"]),
         .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"]),
         .library(name: "DPDatabase", targets: ["DPDatabase"]),
+        .library(name: "DPBookmarks", targets: ["DPBookmarks"]),
         .library(name: "DPTransfer", targets: ["DPTransfer"])
     ],
 
@@ -93,6 +94,18 @@ let package = Package(
         .testTarget(
             name: "DPDatabaseTests",
             dependencies: ["DPDatabase"],
+            swiftSettings: swiftSettings
+        ),
+
+        // Saved connections. Never touches secrets — those stay in DPCredentials and the Keychain.
+        .target(
+            name: "DPBookmarks",
+            dependencies: ["DPCore", "DPDatabase"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPBookmarksTests",
+            dependencies: ["DPBookmarks", "DPCore", "DPDatabase"],
             swiftSettings: swiftSettings
         ),
 
