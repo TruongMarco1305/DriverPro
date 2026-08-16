@@ -28,7 +28,8 @@ let package = Package(
     products: [
         .library(name: "DPCore", targets: ["DPCore"]),
         .library(name: "DPCredentials", targets: ["DPCredentials"]),
-        .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"])
+        .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"]),
+        .library(name: "DPTransfer", targets: ["DPTransfer"])
     ],
 
     dependencies: [
@@ -48,7 +49,7 @@ let package = Package(
         // satisfy. A library rather than a test target because two different test targets import it.
         .target(
             name: "DPTestSupport",
-            dependencies: ["DPCore"],
+            dependencies: ["DPCore", "DPTransfer"],
             swiftSettings: swiftSettings
         ),
         .testTarget(
@@ -82,6 +83,19 @@ let package = Package(
             ],
             swiftSettings: swiftSettings
         ),
+        // The transfer engine. Reaches backends only through Session and SessionFactory, so it depends
+        // on no protocol target.
+        .target(
+            name: "DPTransfer",
+            dependencies: ["DPCore"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPTransferTests",
+            dependencies: ["DPTransfer", "DPCore", "DPTestSupport"],
+            swiftSettings: swiftSettings
+        ),
+
         .testTarget(
             name: "DPProtocolSFTPTests",
             dependencies: ["DPProtocolSFTP", "DPCore", "DPCredentials", "DPTestSupport"],
