@@ -29,6 +29,7 @@ let package = Package(
         .library(name: "DPCore", targets: ["DPCore"]),
         .library(name: "DPCredentials", targets: ["DPCredentials"]),
         .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"]),
+        .library(name: "DPDatabase", targets: ["DPDatabase"]),
         .library(name: "DPTransfer", targets: ["DPTransfer"])
     ],
 
@@ -83,6 +84,18 @@ let package = Package(
             ],
             swiftSettings: swiftSettings
         ),
+        // Persistence. Wraps the system SQLite3 — no third-party dependency — and knows nothing about
+        // any DriverPro model, so DPBookmarks and (in M2) DPTransfer can both sit on top.
+        .target(
+            name: "DPDatabase",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPDatabaseTests",
+            dependencies: ["DPDatabase"],
+            swiftSettings: swiftSettings
+        ),
+
         // The transfer engine. Reaches backends only through Session and SessionFactory, so it depends
         // on no protocol target.
         .target(
