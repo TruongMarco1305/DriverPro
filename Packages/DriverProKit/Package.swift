@@ -27,10 +27,17 @@ let package = Package(
 
     products: [
         .library(name: "DPCore", targets: ["DPCore"]),
-        .library(name: "DPCredentials", targets: ["DPCredentials"])
+        .library(name: "DPCredentials", targets: ["DPCredentials"]),
+        .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"])
     ],
 
-    dependencies: [],
+    dependencies: [
+        // Citadel wraps swift-nio-ssh and adds the SFTP subsystem. Verified to build under Swift 6
+        // strict concurrency by a throwaway spike before being adopted.
+        .package(url: "https://github.com/orlandos-nl/Citadel.git", from: "0.12.1")
+
+        // Soto -> DPProtocolS3 (M4)
+    ],
 
     targets: [
         .target(
@@ -61,6 +68,23 @@ let package = Package(
         .testTarget(
             name: "DPCredentialsTests",
             dependencies: ["DPCredentials", "DPCore"],
+            swiftSettings: swiftSettings
+        ),
+
+        // The SFTP backend. This is the ONLY target allowed to import Citadel — that containment is
+        // what would let libssh2 replace it without anything above noticing.
+        .target(
+            name: "DPProtocolSFTP",
+            dependencies: [
+                "DPCore",
+                "DPCredentials",
+                .product(name: "Citadel", package: "Citadel")
+            ],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPProtocolSFTPTests",
+            dependencies: ["DPProtocolSFTP", "DPCore", "DPCredentials", "DPTestSupport"],
             swiftSettings: swiftSettings
         )
     ]
