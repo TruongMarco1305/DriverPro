@@ -1,0 +1,15 @@
+services:
+  sftp:
+    image: atmoz/sftp:alpine
+    container_name: integration-sftp
+    platform: linux/amd64
+    ports:
+      - "${SFTP_PORT}:22"
+    # user:password:UID:GID:directories-to-create. Empty UID/GID let the image choose.
+    command: ${SFTP_USER}:${SFTP_PASSWORD}:::${SFTP_UPLOAD_DIR}
+    healthcheck:
+      test: ["CMD", "sh", "-c", "netstat -ltn | grep -q ':22 '"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
