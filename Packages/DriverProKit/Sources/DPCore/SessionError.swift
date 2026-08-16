@@ -79,6 +79,9 @@ public enum SessionError: Error, Hashable, Sendable {
     /// A transport-level failure, wrapping whatever the underlying library reported.
     case transport(String)
 
+    /// No backend is registered for this protocol. A composition-root mistake, not a server problem.
+    case unknownProtocol(ProtocolIdentifier)
+
     /// The operation was cancelled, normally because the user cancelled it or the parent task was
     /// cancelled. Never surface this as an error alert.
     case cancelled
@@ -98,7 +101,7 @@ extension SessionError {
             true
         case .authenticationFailed, .hostKeyRejected, .notFound, .accessDenied,
              .notADirectory, .alreadyExists, .directoryNotEmpty, .insufficientStorage,
-             .unsupported, .protocolViolation, .cancelled:
+             .unsupported, .protocolViolation, .cancelled, .unknownProtocol:
             false
         }
     }
@@ -151,6 +154,8 @@ extension SessionError: LocalizedError {
             "The connection failed: \(detail)"
         case .cancelled:
             "The operation was cancelled."
+        case .unknownProtocol(let identifier):
+            "DriverPro cannot connect using \(identifier.rawValue)."
         }
     }
 
