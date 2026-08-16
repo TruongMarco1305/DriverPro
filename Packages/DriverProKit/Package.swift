@@ -26,7 +26,8 @@ let package = Package(
     platforms: [.macOS(.v14)],
 
     products: [
-        .library(name: "DPCore", targets: ["DPCore"])
+        .library(name: "DPCore", targets: ["DPCore"]),
+        .library(name: "DPCredentials", targets: ["DPCredentials"])
     ],
 
     dependencies: [],
@@ -49,5 +50,18 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
 
+        // Secrets and trust. Note the dependency list: DPCore only. Keychain access and known_hosts
+        // parsing need Security and CryptoKit, which are system frameworks — no third-party code is
+        // involved in handling the user's passwords.
+        .target(
+            name: "DPCredentials",
+            dependencies: ["DPCore"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPCredentialsTests",
+            dependencies: ["DPCredentials", "DPCore"],
+            swiftSettings: swiftSettings
+        )
     ]
 )
