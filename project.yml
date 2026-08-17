@@ -1,0 +1,67 @@
+# XcodeGen spec for the DriverPro app.
+#
+#   xcodegen generate && xcodebuild -scheme DriverPro -destination 'platform=macOS' build
+#
+# DriverPro.xcodeproj is generated from this file and gitignored — edit this, never the project.
+# See docs/decisions/001-spm-core-with-generated-app-shell.md.
+
+name: DriverPro
+
+options:
+  bundleIdPrefix: dev.tgknam
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+packages:
+  DriverProKit:
+    path: Packages/DriverProKit
+
+targets:
+  DriverPro:
+    type: application
+    platform: macOS
+
+    sources:
+      - path: App
+
+    dependencies:
+      # The app talks to the presentation layer and the composition root. It never reaches past them
+      # into a protocol target — that is the layering rule the whole package is built around.
+      - package: DriverProKit
+        product: DPPresentation
+      - package: DriverProKit
+        product: DPServices
+      - package: DriverProKit
+        product: DPCore
+      - package: DriverProKit
+        product: DPBookmarks
+
+    info:
+      path: App/Resources/Info.plist
+      properties:
+        CFBundleName: DriverPro
+        CFBundleDisplayName: DriverPro
+        LSMinimumSystemVersion: "26.0"
+        LSApplicationCategoryType: public.app-category.utilities
+        NSHighResolutionCapable: true
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.tgknam.DriverPro
+        PRODUCT_NAME: DriverPro
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+
+        # Swift 6 language mode, matching the package. Data-race safety is an error here too.
+        SWIFT_VERSION: "6.0"
+
+        # Signed to run locally. Distribution signing is a later concern; this only has to launch.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+
+        # Deliberately NOT sandboxed: the app reads ~/.ssh/known_hosts, which App Sandbox forbids
+        # without user-selected file access. See docs/decisions/004-known-hosts-and-keychain.md.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
