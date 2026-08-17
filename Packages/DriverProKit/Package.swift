@@ -32,7 +32,8 @@ let package = Package(
         .library(name: "DPDatabase", targets: ["DPDatabase"]),
         .library(name: "DPBookmarks", targets: ["DPBookmarks"]),
         .library(name: "DPTransfer", targets: ["DPTransfer"]),
-        .library(name: "DPServices", targets: ["DPServices"])
+        .library(name: "DPServices", targets: ["DPServices"]),
+        .library(name: "DPPresentation", targets: ["DPPresentation"])
     ],
 
     dependencies: [
@@ -134,6 +135,20 @@ let package = Package(
         .testTarget(
             name: "DPServicesTests",
             dependencies: ["DPServices", "DPCore", "DPCredentials", "DPTestSupport"],
+            swiftSettings: swiftSettings
+        ),
+
+        // Observable state for a user interface. The one target permitted @MainActor; still no
+        // SwiftUI, so `swift test` covers it.
+        .target(
+            name: "DPPresentation",
+            dependencies: ["DPCore", "DPServices", "DPBookmarks", "DPTransfer"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPPresentationTests",
+            dependencies: ["DPPresentation", "DPCore", "DPServices", "DPTestSupport", "DPDatabase",
+                           "DPBookmarks"],
             swiftSettings: swiftSettings
         ),
 
