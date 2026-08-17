@@ -15,7 +15,10 @@ import DPCore
 import Foundation
 
 /// What to do when a file already exists at the destination.
-public enum OverwritePolicy: Hashable, Sendable {
+///
+/// `String`-backed so it can be persisted — by `@AppStorage` today, and by the queue's own storage when
+/// transfers survive a relaunch in M2. The raw values are written to disk, so treat them as fixed.
+public enum OverwritePolicy: String, Hashable, Sendable, CaseIterable {
     /// Replace it.
     case overwrite
     /// Leave it alone and count the item as skipped.

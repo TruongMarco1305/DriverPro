@@ -330,8 +330,21 @@ public actor TransferQueue {
                 destination = await LocalFileIO.uniqueURL(for: destination)
             case .resume where session.capabilities.contains(.resumeDownload):
                 offset = LocalFileIO.size(of: destination) ?? 0
-                // Already complete: nothing to resume.
-                if let size = item.size, offset >= size { return .transferred(bytes: 0) }
+
+                // Resuming assumes what is already on disk is a *prefix* of the remote file. A local
+                // file LARGER than the source cannot be — it is a different file that happens to share
+                // the name — so start again rather than reporting success and keeping it.
+                //
+                // The reverse case, a smaller unrelated file, cannot be told apart from a genuinely
+                // interrupted download without hashing. That is the assumption `.resume` rests on, and
+                // the reason the policy is selectable.
+                if let size = item.size {
+                    if offset > size {
+                        offset = 0
+                    } else if offset == size {
+                        return .transferred(bytes: 0)   // already complete
+                    }
+                }
             case .resume, .overwrite:
                 offset = 0
             }
@@ -360,7 +373,16 @@ public actor TransferQueue {
                 destination = await uniqueRemotePath(for: destination, session: session)
             case .resume where session.capabilities.contains(.resumeUpload):
                 offset = (try? await session.stat(destination).size) ?? 0
-                if let size = item.size, offset >= size { return .transferred(bytes: 0) }
+
+                // Same reasoning as the download side: a remote file larger than the local source
+                // cannot be a partial copy of it.
+                if let size = item.size {
+                    if offset > size {
+                        offset = 0
+                    } else if offset == size {
+                        return .transferred(bytes: 0)
+                    }
+                }
             case .resume, .overwrite:
                 offset = 0
             }

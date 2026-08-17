@@ -197,6 +197,36 @@ struct FileOperationTests {
         #expect(destination == RemotePath("/srv/tree"), "uploads go to the directory being shown")
     }
 
+    @Test("The default policy is resume, not overwrite")
+    func defaultPolicyIsResume() async throws {
+        // Overwrite was the silent default until now: downloading a file you already had destroyed the
+        // local copy with no warning.
+        let (model, _) = try await makeBrowser()
+        let item = try #require(model.visibleItems.first { $0.name == "file.txt" })
+
+        let download = try #require(model.makeDownload(of: [item], to: URL(fileURLWithPath: "/tmp")))
+        let upload = try #require(model.makeUpload(of: [URL(fileURLWithPath: "/tmp/x")]))
+
+        #expect(download.overwritePolicy == .resume)
+        #expect(upload.overwritePolicy == .resume)
+    }
+
+    @Test("The chosen policy reaches the transfer", arguments: [
+        OverwritePolicy.overwrite, .skip, .rename, .resume
+    ])
+    func policyIsCarried(_ policy: OverwritePolicy) async throws {
+        let (model, _) = try await makeBrowser()
+        let item = try #require(model.visibleItems.first { $0.name == "file.txt" })
+
+        let download = try #require(
+            model.makeDownload(of: [item], to: URL(fileURLWithPath: "/tmp"), policy: policy)
+        )
+        let upload = try #require(model.makeUpload(of: [URL(fileURLWithPath: "/tmp/x")], policy: policy))
+
+        #expect(download.overwritePolicy == policy)
+        #expect(upload.overwritePolicy == policy)
+    }
+
     @Test("Nothing selected builds no transfer")
     func emptyBuildsNothing() async throws {
         let (model, _) = try await makeBrowser()

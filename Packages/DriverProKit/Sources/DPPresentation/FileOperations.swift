@@ -79,22 +79,34 @@ extension BrowserModel {
     /// - Parameters:
     ///   - items: What to fetch. Directories are taken whole.
     ///   - destination: The local folder to write into.
+    ///   - policy: What to do about files that already exist.
     /// - Returns: The job, or `nil` if there is nothing to do.
-    public func makeDownload(of items: [RemoteItem], to destination: URL) -> Transfer? {
+    public func makeDownload(
+        of items: [RemoteItem],
+        to destination: URL,
+        policy: OverwritePolicy = .resume
+    ) -> Transfer? {
         guard let host, !items.isEmpty else { return nil }
         return Transfer(
             host: host,
-            work: .download(sources: items.map(\.path), destination: destination)
+            work: .download(sources: items.map(\.path), destination: destination),
+            overwritePolicy: policy
         )
     }
 
     /// Builds an upload of local files into the directory being shown.
     ///
-    /// - Parameter urls: What to send. Folders are taken whole.
+    /// - Parameters:
+    ///   - urls: What to send. Folders are taken whole.
+    ///   - policy: What to do about files that already exist.
     /// - Returns: The job, or `nil` if there is nothing to do.
-    public func makeUpload(of urls: [URL]) -> Transfer? {
+    public func makeUpload(of urls: [URL], policy: OverwritePolicy = .resume) -> Transfer? {
         guard let host, !urls.isEmpty else { return nil }
-        return Transfer(host: host, work: .upload(sources: urls, destination: path))
+        return Transfer(
+            host: host,
+            work: .upload(sources: urls, destination: path),
+            overwritePolicy: policy
+        )
     }
 
     /// The entries currently selected, in the order shown.

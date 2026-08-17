@@ -276,6 +276,77 @@ struct OverwritePolicyTests {
         #expect(try Data(contentsOf: destination) == payload)
     }
 
+    @Test("A local file larger than the remote one is refetched, not mistaken for complete")
+    func resumeRefetchesWhenLocalIsLarger() async throws {
+        // `.resume` assumes the local file is a prefix of the remote one. A file *larger* than the
+        // source cannot be, so treating "offset >= size" as complete silently keeps the wrong file and
+        // reports success. That matters much more now that .resume is the default.
+        let session = try await TransferFixture.makeSession()
+        let payload = TransferFixture.bytes(500)
+        await session.seed(file: RemotePath("/srv/file.bin"), contents: payload)
+
+        let local = try TransferFixture.makeTemporaryDirectory()
+        let destination = local.appending(path: "file.bin")
+        // A different, longer file that happens to share the name.
+        try Data(repeating: 0xEE, count: 900).write(to: destination)
+
+        let queue = TransferQueue(pool: TransferFixture.makePool(session: session))
+        let events = await queue.run(Transfer(
+            host: TransferFixture.host,
+            work: .download(sources: [RemotePath("/srv/file.bin")], destination: local),
+            overwritePolicy: .resume
+        )).collect()
+
+        #expect(try #require(events.report).transferred == 1)
+        #expect(try Data(contentsOf: destination) == payload, "the stale local file should have been replaced")
+    }
+
+    @Test("A local file the same size as the remote one is left alone")
+    func resumeSkipsWhenAlreadyComplete() async throws {
+        // What makes .resume a safe default: re-downloading something you already have costs nothing
+        // instead of destroying it.
+        let session = try await TransferFixture.makeSession()
+        let payload = TransferFixture.bytes(400)
+        await session.seed(file: RemotePath("/srv/done.bin"), contents: payload)
+
+        let local = try TransferFixture.makeTemporaryDirectory()
+        let destination = local.appending(path: "done.bin")
+        try payload.write(to: destination)
+
+        let queue = TransferQueue(pool: TransferFixture.makePool(session: session))
+        let events = await queue.run(Transfer(
+            host: TransferFixture.host,
+            work: .download(sources: [RemotePath("/srv/done.bin")], destination: local),
+            overwritePolicy: .resume
+        )).collect()
+
+        let report = try #require(events.report)
+        #expect(report.bytes == 0, "nothing needed to cross the wire")
+        #expect(try Data(contentsOf: destination) == payload)
+    }
+
+    @Test("An upload whose remote copy is larger is replaced, not skipped")
+    func resumeUploadRefetchesWhenRemoteIsLarger() async throws {
+        let session = try await TransferFixture.makeSession()
+        let local = try TransferFixture.makeTemporaryDirectory()
+        let payload = TransferFixture.bytes(300)
+        let source = local.appending(path: "up.bin")
+        try payload.write(to: source)
+
+        // A longer file already on the server under the same name.
+        await session.seed(file: RemotePath("/srv/up.bin"), contents: Data(repeating: 0x11, count: 800))
+
+        let queue = TransferQueue(pool: TransferFixture.makePool(session: session))
+        let events = await queue.run(Transfer(
+            host: TransferFixture.host,
+            work: .upload(sources: [source], destination: RemotePath("/srv")),
+            overwritePolicy: .resume
+        )).collect()
+
+        #expect(try #require(events.report).transferred == 1)
+        #expect(try await session.stat(RemotePath("/srv/up.bin")).size == 300)
+    }
+
     @Test("resume falls back to a full transfer when the backend cannot seek")
     func resumeWithoutCapability() async throws {
         let session = try await TransferFixture.makeSession(
