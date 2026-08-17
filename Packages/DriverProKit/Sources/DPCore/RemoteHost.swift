@@ -130,11 +130,24 @@ public struct RemoteHost: Hashable, Sendable, Codable, Identifiable {
 
     // MARK: - Derived values
 
-    /// What to show in the sidebar: the nickname if set, otherwise `user@host`.
+    /// What to call this connection: the nickname, else the user name, else the address.
+    ///
+    /// The address is the last resort rather than part of the fallback, so a sidebar full of bookmarks
+    /// is not also a list of the servers someone can reach.
     public var displayName: String {
         if let nickname, !nickname.isEmpty { return nickname }
-        if let username, !username.isEmpty { return "\(username)@\(hostname)" }
+        if let username, !username.isEmpty { return username }
         return hostname
+    }
+
+    /// A second line beneath ``displayName``, or `nil` when there is nothing left to add.
+    ///
+    /// Only the user name, and only when the title is a nickname — otherwise the row would say the same
+    /// thing twice.
+    public var subtitle: String? {
+        guard let nickname, !nickname.isEmpty,
+              let username, !username.isEmpty else { return nil }
+        return username
     }
 
     // MARK: - Keychain addressing

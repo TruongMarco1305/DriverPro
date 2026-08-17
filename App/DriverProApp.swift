@@ -6,6 +6,7 @@
 //  goes through DPServices. No protocol target is imported here.
 //
 
+import DPCore
 import DPPresentation
 import DPServices
 import SwiftUI
@@ -27,7 +28,7 @@ struct DriverProApp: App {
         }
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Open Connection…") { environment.isShowingConnectionSheet = true }
+                Button("Open Connection…") { environment.connectionSheet = .create }
                     .keyboardShortcut("k")
             }
         }
@@ -63,8 +64,8 @@ final class AppEnvironment {
     /// Why the app could not start, if it could not.
     private(set) var startupError: String?
 
-    /// Whether the connection sheet is up.
-    var isShowingConnectionSheet = false
+    /// The connection sheet that is up, or `nil` when none is.
+    var connectionSheet: ConnectionSheetMode?
 
     init() {
         do {
@@ -76,6 +77,25 @@ final class AppEnvironment {
             TerminationDelegate.shared = self
         } catch {
             startupError = "DriverPro could not open its database.\n\n\(error.localizedDescription)"
+        }
+    }
+}
+
+/// What the connection sheet is for.
+///
+/// One sheet serves both jobs — the fields are the same, and only the identity, the primary button and
+/// whether the protocol chooser appears differ.
+enum ConnectionSheetMode: Identifiable {
+    /// Describe a new connection, starting from the protocol chooser.
+    case create
+    /// Change a saved bookmark, keeping its identity.
+    case edit(RemoteHost)
+
+    /// Identity for `sheet(item:)`. Editing is keyed by the bookmark, so switching bookmarks re-presents.
+    var id: String {
+        switch self {
+        case .create: "create"
+        case .edit(let host): host.id.uuidString
         }
     }
 }

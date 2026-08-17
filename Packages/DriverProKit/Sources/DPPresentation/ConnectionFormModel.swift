@@ -39,8 +39,17 @@ public final class ConnectionFormModel {
     public var defaultPath = ""
     /// Sidebar label.
     public var nickname = ""
-    /// Whether to save the password once the server accepts it.
-    public var savesPassword = true
+    /// Free-text note about the connection, stored on the bookmark.
+    public var details = ""
+
+    /// The bookmark being edited, or `nil` when this form creates a new connection.
+    ///
+    /// Set by ``load(from:)``. Keeping the id is what makes a save an update: `BookmarkStore.save`
+    /// upserts on it, so re-saving under a fresh `UUID` would silently duplicate the bookmark.
+    public private(set) var editingID: UUID?
+
+    /// Whether this form is changing an existing bookmark rather than making one.
+    public var isEditing: Bool { editingID != nil }
 
     /// Creates a form.
     ///
@@ -67,10 +76,13 @@ public final class ConnectionFormModel {
 
     /// Whether the form can be submitted.
     ///
-    /// A hostname and a port that parses. Everything else is optional — anonymous FTP has no user name,
-    /// and a password may come from the Keychain.
+    /// A hostname, a port that parses, and — when creating — a password, because a new connection has
+    /// nothing in the Keychain to fall back on. Editing an existing bookmark accepts a blank password:
+    /// it means "keep the saved one" rather than "connect with no password".
     public var isValid: Bool {
-        !hostname.trimmingCharacters(in: .whitespaces).isEmpty && parsedPort != nil
+        !hostname.trimmingCharacters(in: .whitespaces).isEmpty
+            && parsedPort != nil
+            && !(shows(.password) && password.isEmpty && !isEditing)
     }
 
     private var parsedPort: Int? {
@@ -82,48 +94,55 @@ public final class ConnectionFormModel {
 
     /// Builds the bookmark, or `nil` when the form is not valid.
     ///
-    /// - Parameter id: Identity to use. Pass an existing bookmark's id to edit it in place.
-    public func makeHost(id: UUID = UUID()) -> RemoteHost? {
+    /// - Parameter id: Identity to use. Defaults to the loaded bookmark's, or a fresh one.
+    public func makeHost(id: UUID? = nil) -> RemoteHost? {
         guard isValid, let parsedPort else { return nil }
 
         let trimmedUser = username.trimmingCharacters(in: .whitespaces)
         let trimmedNickname = nickname.trimmingCharacters(in: .whitespaces)
         let trimmedPath = defaultPath.trimmingCharacters(in: .whitespaces)
+        let trimmedDetails = details.trimmingCharacters(in: .whitespaces)
 
         return RemoteHost(
-            id: id,
+            id: id ?? editingID ?? UUID(),
             protocolIdentifier: protocolIdentifier,
             hostname: hostname.trimmingCharacters(in: .whitespaces),
             port: parsedPort,
             username: trimmedUser.isEmpty ? nil : trimmedUser,
             defaultPath: trimmedPath.isEmpty ? nil : RemotePath(trimmedPath),
-            nickname: trimmedNickname.isEmpty ? nil : trimmedNickname
+            nickname: trimmedNickname.isEmpty ? nil : trimmedNickname,
+            comment: trimmedDetails.isEmpty ? nil : trimmedDetails
         )
     }
 
-    /// Credentials from what was typed, or `nil` if no password was given.
+    /// Credentials from what was typed.
     ///
-    /// A blank password is not the same as no password: leaving it empty means "use what is saved", so
-    /// this returns `nil` and the coordinator falls back to the credential store.
+    /// Always saved to the Keychain on success — the sheet no longer offers a choice, because a
+    /// connection worth creating is one worth reconnecting to without retyping.
     public func makeCredentials() -> Credentials? {
         guard !password.isEmpty else { return nil }
-        let trimmedUser = username.trimmingCharacters(in: .whitespaces)
         return .password(
-            username: trimmedUser,
+            username: username.trimmingCharacters(in: .whitespaces),
             password: password,
-            shouldPersist: savesPassword
+            shouldPersist: true
         )
     }
 
     /// Fills the form from an existing bookmark, for editing.
+    ///
+    /// The password is deliberately not loaded — it lives in the Keychain and is never read back into a
+    /// text field. Leaving it blank keeps it.
+    ///
     /// - Parameter host: The bookmark to load.
     public func load(from host: RemoteHost) {
+        editingID = host.id
         protocolIdentifier = host.protocolIdentifier
         hostname = host.hostname
         port = String(host.port)
         username = host.username ?? ""
         defaultPath = host.defaultPath?.pathString ?? ""
         nickname = host.nickname ?? ""
+        details = host.comment ?? ""
         password = ""
     }
 }

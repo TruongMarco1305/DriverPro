@@ -5,6 +5,7 @@
 
 import DPCore
 import DPPresentation
+import DPServices
 import SwiftUI
 
 /// Saved connections. Selecting one connects to it.
@@ -12,16 +13,17 @@ struct BookmarkSidebar: View {
 
     @Environment(AppEnvironment.self) private var environment
 
+    /// Which row the pointer is over. A `List` of plain buttons gives no feedback of its own.
+    @State private var hovered: RemoteHost.ID?
+
     var body: some View {
         @Bindable var environment = environment
 
         Group {
             if let bookmarks = environment.bookmarks {
                 List {
-                    Section("Bookmarks") {
-                        ForEach(bookmarks.bookmarks) { host in
-                            row(for: host, in: bookmarks)
-                        }
+                    ForEach(bookmarks.bookmarks) { host in
+                        row(for: host, in: bookmarks)
                     }
                 }
                 .task { await bookmarks.reload() }
@@ -38,33 +40,79 @@ struct BookmarkSidebar: View {
                 List {}
             }
         }
+        // Clipped on the container, not the rows, so the list scrolls under a rounded edge rather than
+        // each row being rounded.
+        .clipShape(.rect(topLeadingRadius: 10, topTrailingRadius: 10))
         .toolbar {
             Button {
-                environment.isShowingConnectionSheet = true
+                environment.connectionSheet = .create
             } label: {
                 Label("New Connection", systemImage: "plus")
             }
+            .help("Connect to a server (⌘K)")
         }
     }
 
     private func row(for host: RemoteHost, in bookmarks: BookmarkListModel) -> some View {
-        Button {
+        // The connection being browsed, marked the way a selected row looks anywhere in macOS. Derived
+        // rather than stored: `BrowserModel` already knows, and disconnecting clears it for free.
+        let isConnected = environment.browser?.host?.id == host.id
+
+        return Button {
             Task { await environment.browser?.connect(to: host) }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(host.displayName)
-                Text("\(host.protocolIdentifier.rawValue)://\(host.hostname):\(host.port)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                // Fixed width so names line up however wide the symbol draws.
+                Image(systemName: icon(for: host))
+                    .font(.title3)
+                    .foregroundStyle(isConnected ? AnyShapeStyle(.white) : AnyShapeStyle(.tint))
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(host.displayName).lineLimit(1)
+                    // The user name, never the address: a sidebar should not double as a list of the
+                    // servers this machine can reach. `subtitle` is nil when it would only repeat the
+                    // title.
+                    if let subtitle = host.subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(isConnected ? .white.opacity(0.8) : .secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
             }
+            .foregroundStyle(isConnected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .contentShape(.rect)      // the gaps are clickable too, not just the text
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(background(isConnected: isConnected, isHovered: hovered == host.id))
+            )
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 ? host.id : (hovered == host.id ? nil : hovered) }
+        .help(host.comment ?? "Connect to \(host.displayName)")
         .contextMenu {
+            Button("Edit Bookmark…") { environment.connectionSheet = .edit(host) }
+
             // Deleting a bookmark leaves its Keychain item alone: the two have separate lifetimes,
             // and silently removing a password would be surprising.
             Button("Delete Bookmark", role: .destructive) {
                 Task { await bookmarks.delete(host.id) }
             }
         }
+    }
+
+    /// Selection wins over hover, so pointing at the open connection does not lighten it.
+    private func background(isConnected: Bool, isHovered: Bool) -> Color {
+        if isConnected { return .accentColor }
+        return isHovered ? Color.primary.opacity(0.08) : .clear
+    }
+
+    /// The symbol for a bookmark's protocol, from the catalog rather than a `switch` here.
+    private func icon(for host: RemoteHost) -> String {
+        ProtocolCatalog.live.descriptor(for: host.protocolIdentifier)?.iconName ?? "server.rack"
     }
 }
