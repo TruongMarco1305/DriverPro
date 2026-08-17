@@ -19,6 +19,7 @@ public actor TransferQueue {
 
     private let pool: SessionPool
     private let maxConcurrentFiles: Int
+    private let journal: (any TransferJournal)?
     private var running: [UUID: Task<Void, Never>] = [:]
 
     /// Creates a queue.
@@ -27,9 +28,16 @@ public actor TransferQueue {
     ///   - pool: Where connections come from.
     ///   - maxConcurrentFiles: How many files move at once. Should not exceed the pool's per-host limit,
     ///     or workers simply queue for connections.
-    public init(pool: SessionPool, maxConcurrentFiles: Int = 4) {
+    ///   - journal: Where unfinished transfers are remembered. `nil` means a transfer is forgotten when
+    ///     the process ends, which is what tests want and what M1 did.
+    public init(
+        pool: SessionPool,
+        maxConcurrentFiles: Int = 4,
+        journal: (any TransferJournal)? = nil
+    ) {
         self.pool = pool
         self.maxConcurrentFiles = maxConcurrentFiles
+        self.journal = journal
     }
 
     // MARK: - Running
@@ -41,11 +49,20 @@ public actor TransferQueue {
     ///
     /// - Parameter transfer: What to move.
     /// - Returns: Events, in order.
-    public func run(_ transfer: Transfer) -> AsyncStream<TransferEvent> {
+    /// - Parameter title: What to call it if it has to be restored after a quit. Defaults to the id.
+    public func run(_ transfer: Transfer, title: String? = nil) -> AsyncStream<TransferEvent> {
         let (stream, continuation) = AsyncStream<TransferEvent>.makeStream()
 
         let task = Task {
+            // Recorded before any work starts: a transfer that dies during planning is still one the
+            // user asked for, and should come back.
+            try? await journal?.record(transfer, title: title ?? transfer.id.uuidString)
+
             let report = await execute(transfer, emit: { continuation.yield($0) })
+
+            // However it ended, it has ended — and the journal holds only what has not.
+            try? await journal?.forget(transfer.id)
+
             continuation.yield(.finished(report))
             continuation.finish()
             self.forget(transfer.id)
@@ -249,6 +266,9 @@ public actor TransferQueue {
         in transfer: Transfer,
         emit: @escaping @Sendable (TransferEvent) -> Void
     ) async -> TransferReport {
+        // The journal is updated per finished file, not per chunk: a write every few kilobytes would
+        // cost more than the transfer, and the counters are only there so a restored row can say how
+        // far it got.
         var report = TransferReport()
         let total = totalBytes(of: files)
         let progress = ProgressReporter(grandTotal: total, emit: emit)
@@ -283,6 +303,7 @@ public actor TransferQueue {
                     report.failed += 1
                 }
                 emit(.itemFinished(item, outcome))
+                try? await journal?.updateCounters(for: transfer.id, report: report)
 
                 if Task.isCancelled {
                     report.wasCancelled = true

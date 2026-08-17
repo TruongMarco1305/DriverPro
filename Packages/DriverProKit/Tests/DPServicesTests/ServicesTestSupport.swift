@@ -74,7 +74,7 @@ enum ServicesFixture {
         prompt: any UserPrompt,
         credentials: InMemoryCredentialStore = InMemoryCredentialStore()
     ) async throws -> (DriverProServices, InMemoryCredentialStore) {
-        let database = try Database(.memory, migrations: BookmarkStore.migrations)
+        let database = try Database(.memory, migrations: DriverProServices.migrations)
         // Built with the bookmark it stands in for: a session reports its own host to the delegate, and
         // the credential store is keyed by that identity.
         let backend = MemorySession(host: host)

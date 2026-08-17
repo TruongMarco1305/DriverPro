@@ -118,7 +118,7 @@ let package = Package(
         // on no protocol target.
         .target(
             name: "DPTransfer",
-            dependencies: ["DPCore"],
+            dependencies: ["DPCore", "DPDatabase"],
             swiftSettings: swiftSettings
         ),
         .testTarget(

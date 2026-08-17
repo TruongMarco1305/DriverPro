@@ -5,6 +5,7 @@
 
 import DPCore
 import DPCredentials
+import DPDatabase
 import DPTestSupport
 import DPTransfer
 import Foundation
@@ -179,5 +180,114 @@ struct SFTPTransferIntegrationTests {
             #expect(await !session.exists(root))
         }
         await pool.disconnectAll()
+    }
+}
+
+/// Losing the app mid-transfer, and picking it up again.
+///
+/// The one thing neither a fake nor a unit test can prove: that a file interrupted part-way through a
+/// real download finishes byte-for-byte when the transfer is restored and resumed. A quit is simulated
+/// by cancelling the transfer and leaving the journal row behind, which is the state a dead process
+/// leaves on disk.
+@Suite(
+    "SFTP transfers — interrupted and resumed",
+    .enabled(if: IntegrationConfig.isEnabled, "run via infra/integration/script.sh"),
+    .serialized
+)
+struct SFTPResumeIntegrationTests {
+
+    private func makeHost() -> RemoteHost {
+        RemoteHost(
+            protocolIdentifier: .sftp,
+            hostname: IntegrationConfig.host ?? "localhost",
+            port: IntegrationConfig.port,
+            username: IntegrationConfig.user
+        )
+    }
+
+    private func makePool() -> SessionPool {
+        let knownHosts = KnownHostsStore(
+            fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+                .appending(path: "dp-known_hosts-\(UUID().uuidString)")
+        )
+        return SessionPool(
+            factory: ClosureSessionFactory([
+                .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) }
+            ]),
+            delegate: ScriptedDelegate(
+                credentials: .password(username: IntegrationConfig.user,
+                                       password: IntegrationConfig.password)
+            ),
+            maxConnectionsPerHost: 2
+        )
+    }
+
+    @Test("An interrupted download resumes to a byte-perfect file")
+    func interruptedDownloadResumes() async throws {
+        let database = try Database(.memory, migrations: SQLiteTransferJournal.migrations)
+        let journal = SQLiteTransferJournal(database: database)
+        let pool = makePool()
+        let queue = TransferQueue(pool: pool, maxConcurrentFiles: 1, journal: journal)
+        let host = makeHost()
+
+        // Big enough that cancelling lands mid-file rather than between files.
+        let payload = Data((0..<(6 * 1024 * 1024)).map { UInt8($0 % 251) })
+        let remoteRoot = RemotePath(IntegrationConfig.basePath)
+            .appending("resume-\(UUID().uuidString.prefix(8))")
+        let remoteFile = remoteRoot.appending("big.bin")
+
+        let local = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "dp-resume-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: local, withIntermediateDirectories: true)
+
+        try await pool.withSession(for: host) { session in
+            try await session.createDirectory(remoteRoot)
+            try await session.write(remoteFile,
+                                    contents: SessionContract.stream(payload, chunkSize: 64 * 1024),
+                                    size: Int64(payload.count), resumingAt: 0)
+        }
+
+        let transfer = Transfer(
+            host: host,
+            work: .download(sources: [remoteFile], destination: local),
+            overwritePolicy: .resume
+        )
+
+        // Start it, then pull the rug out part-way through.
+        let stream = await queue.run(transfer, title: "big.bin")
+        var seen: Int64 = 0
+        for await event in stream {
+            if case .progress(let bytes, _) = event, bytes > Int64(payload.count) / 3 {
+                await queue.cancel(transfer.id)
+                seen = bytes
+                break
+            }
+        }
+        #expect(seen > 0, "the transfer never got going, so nothing was interrupted")
+
+        let partial = local.appending(path: "big.bin")
+        let partialSize = (try? partial.resourceValues(forKeys: [.fileSizeKey]).fileSize).flatMap { $0 } ?? 0
+        #expect(partialSize > 0)
+        #expect(partialSize < payload.count, "the file should be incomplete at this point")
+
+        // A quit leaves the record behind; cancelling deliberately does not, so put it back.
+        try await journal.record(transfer, title: "big.bin")
+
+        let restored = try #require(try await journal.unfinished().first)
+        #expect(restored.title == "big.bin")
+
+        let finished = await queue.run(restored.transfer, title: restored.title).collect()
+        let report = try #require(finished.report)
+        #expect(report.isSuccess)
+
+        let written = try Data(contentsOf: partial)
+        #expect(written.count == payload.count, "resumed to the right length")
+        #expect(written == payload, "and to the right bytes — no truncation, no doubled prefix")
+        #expect(try await journal.unfinished().isEmpty, "finished means forgotten")
+
+        try? FileManager.default.removeItem(at: local)
+        try? await pool.withSession(for: host) { session in
+            try await session.deleteTree(remoteRoot)
+        }
     }
 }

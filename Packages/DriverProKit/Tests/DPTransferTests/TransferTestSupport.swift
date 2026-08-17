@@ -76,6 +76,11 @@ enum TransferFixture {
         )
     }
 
+    /// A pool that cannot produce a session, for the "the transfer never started" paths.
+    static func makeFailingPool() -> SessionPool {
+        SessionPool(factory: FailingSessionFactory(), delegate: ScriptedDelegate())
+    }
+
     /// A fresh empty temporary directory, removed by the caller or left to the OS.
     static func makeTemporaryDirectory() throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())

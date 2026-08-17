@@ -19,10 +19,12 @@ import Foundation
 /// mutable state of its own to protect.
 public struct DriverProServices: Sendable {
 
-    /// The shared connection, backing bookmarks now and the transfer queue in M2.
+    /// The shared connection, backing bookmarks and the transfer journal.
     public let database: Database
     /// Saved connections.
     public let bookmarks: BookmarkStore
+    /// Transfers that have not finished, so a quit does not lose them.
+    public let journal: any TransferJournal
     /// Where passwords live.
     public let credentials: any CredentialStore
     /// Trusted SSH host keys.
@@ -53,6 +55,7 @@ public struct DriverProServices: Sendable {
     ///     tests substitute an in-memory backend so the wiring can be exercised without a server.
     ///   - maxConnectionsPerHost: How many connections one server may have at once.
     ///   - maxConcurrentFiles: How many files move at once.
+    ///   - journal: Where unfinished transfers are remembered. Defaults to the shared database.
     public init(
         database: Database,
         credentials: any CredentialStore,
@@ -61,7 +64,8 @@ public struct DriverProServices: Sendable {
         catalog: ProtocolCatalog = .live,
         sessionFactory: (any SessionFactory)? = nil,
         maxConnectionsPerHost: Int = 4,
-        maxConcurrentFiles: Int = 4
+        maxConcurrentFiles: Int = 4,
+        journal: (any TransferJournal)? = nil
     ) {
         self.database = database
         self.credentials = credentials
@@ -78,8 +82,18 @@ public struct DriverProServices: Sendable {
             maxConnectionsPerHost: maxConnectionsPerHost
         )
         self.pool = pool
-        self.queue = TransferQueue(pool: pool, maxConcurrentFiles: maxConcurrentFiles)
+
+        let journal = journal ?? SQLiteTransferJournal(database: database)
+        self.journal = journal
+        self.queue = TransferQueue(pool: pool, maxConcurrentFiles: maxConcurrentFiles, journal: journal)
     }
+
+    /// Every migration the shared database needs, in version order.
+    ///
+    /// Collected here because versions are global to the file, not per-table: each store contributes
+    /// its own, and this is the only place that knows they all share one connection.
+    public static let migrations: [Migration] =
+        BookmarkStore.migrations + SQLiteTransferJournal.migrations
 
     /// The production configuration: a database in Application Support, and the user's `~/.ssh/known_hosts`.
     ///
@@ -92,7 +106,7 @@ public struct DriverProServices: Sendable {
     public static func live(prompt: any UserPrompt, databaseURL: URL? = nil) throws -> DriverProServices {
         let database = try Database(
             .file(databaseURL ?? BookmarkStore.defaultDatabaseURL),
-            migrations: BookmarkStore.migrations
+            migrations: migrations
         )
         return DriverProServices(
             database: database,

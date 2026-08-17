@@ -5,10 +5,10 @@
 //  Target responsibility
 //  ────────────────────
 //  DPTransfer moves bytes between the local disk and a remote file system: connection pooling, recursive
-//  enumeration, bounded concurrency, progress, cancellation.
+//  enumeration, bounded concurrency, progress, cancellation, and remembering what has not finished.
 //
-//  It may import Foundation, DPCore. It may NOT import SwiftUI, AppKit, or any DPProtocol* target — it
-//  reaches backends only through `Session` and `SessionFactory`.
+//  It may import Foundation, DPCore, DPDatabase. It may NOT import SwiftUI, AppKit, or any DPProtocol*
+//  target — it reaches backends only through `Session` and `SessionFactory`.
 //
 
 import DPCore
@@ -16,9 +16,12 @@ import Foundation
 
 /// What to do when a file already exists at the destination.
 ///
-/// `String`-backed so it can be persisted — by `@AppStorage` today, and by the queue's own storage when
-/// transfers survive a relaunch in M2. The raw values are written to disk, so treat them as fixed.
-public enum OverwritePolicy: String, Hashable, Sendable, CaseIterable {
+/// `String`-backed so it can be persisted — by `@AppStorage`, and inside a journalled transfer. The raw
+/// values are written to disk, so treat them as fixed.
+///
+/// A `String` raw value gives `Codable` for free, but only once the conformance is declared: Swift
+/// synthesises it from `RawRepresentable`, it does not come with the raw value itself.
+public enum OverwritePolicy: String, Hashable, Sendable, CaseIterable, Codable {
     /// Replace it.
     case overwrite
     /// Leave it alone and count the item as skipped.
@@ -33,13 +36,21 @@ public enum OverwritePolicy: String, Hashable, Sendable, CaseIterable {
 }
 
 /// One queued job: a set of files to move in one direction, for one connection.
-public struct Transfer: Identifiable, Sendable {
+///
+/// `Codable` so an unfinished transfer survives a relaunch — see `TransferJournal` and ADR 010. Every
+/// part of it already was: `RemoteHost`, `RemotePath`, `URL`, and a `String`-backed policy.
+public struct Transfer: Identifiable, Sendable, Codable {
 
     /// The direction, and what is being moved.
     ///
     /// An enum rather than two optional pairs of fields, so a download with a remote destination or an
     /// upload with no source cannot be constructed.
-    public enum Work: Sendable {
+    ///
+    /// ## Swift note — synthesised `Codable` for enums with associated values
+    /// Swift writes the conformance for this too. Each case becomes a keyed container named after it,
+    /// holding its associated values by label. Nothing hand-written is needed, and adding a case keeps
+    /// it that way — see `docs/swift-notes.md`, section 30.
+    public enum Work: Sendable, Codable {
         /// Remote entries to fetch into a local directory.
         case download(sources: [RemotePath], destination: URL)
         /// Local files or folders to send into a remote directory.
