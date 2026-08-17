@@ -16,6 +16,9 @@ struct DriverProApp: App {
     /// The whole application, built once.
     @State private var environment = AppEnvironment()
 
+    /// Closes connections before the process exits.
+    @NSApplicationDelegateAdaptor(TerminationDelegate.self) private var delegate
+
     var body: some Scene {
         WindowGroup("DriverPro") {
             BrowserWindow()
@@ -70,8 +73,37 @@ final class AppEnvironment {
             self.browser = BrowserModel(services: services)
             self.bookmarks = BookmarkListModel(store: services.bookmarks)
             self.transfers = TransferListModel(services: services)
+            TerminationDelegate.shared = self
         } catch {
             startupError = "DriverPro could not open its database.\n\n\(error.localizedDescription)"
         }
+    }
+}
+
+/// Closes pooled connections before the app exits.
+///
+/// ## Swift note — async cleanup at quit
+/// `applicationShouldTerminate` is synchronous, so returning `.terminateNow` lets the process die
+/// immediately — which is what happened before this existed, leaving SSH sockets open until the kernel
+/// tore them down.
+///
+/// `.terminateLater` asks AppKit to wait. The work then happens in a `Task`, and
+/// `reply(toApplicationShouldTerminate:)` releases the app afterwards. The reply is in a `defer` so a
+/// failed disconnect cannot leave the app unable to quit — a hang at shutdown is far worse than a
+/// lingering socket.
+@MainActor
+final class TerminationDelegate: NSObject, NSApplicationDelegate {
+
+    /// The environment to shut down. Set once the app has built one.
+    static weak var shared: AppEnvironment?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let services = Self.shared?.services else { return .terminateNow }
+
+        Task {
+            defer { NSApp.reply(toApplicationShouldTerminate: true) }
+            await services.disconnectAll()
+        }
+        return .terminateLater
     }
 }

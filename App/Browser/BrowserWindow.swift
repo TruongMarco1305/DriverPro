@@ -5,6 +5,7 @@
 
 import DPCore
 import DPPresentation
+import DPTransfer
 import SwiftUI
 
 /// The main window: bookmarks on the left, the current directory on the right.
@@ -60,8 +61,15 @@ private struct BrowserDetail: View {
     @State private var renameText = ""
     @State private var deleteTargets: [RemoteItem] = []
 
+    /// Remembered across launches, so the choice is made once rather than every transfer.
+    @AppStorage("overwritePolicy") private var storedPolicy = OverwritePolicy.resume.rawValue
+
+    private var policy: OverwritePolicy {
+        OverwritePolicy(rawValue: storedPolicy) ?? .resume
+    }
+
     private var commands: FileCommands {
-        FileCommands(browser: browser, transfers: transfers)
+        FileCommands(browser: browser, transfers: transfers, policy: policy)
     }
 
     var body: some View {
@@ -110,6 +118,16 @@ private struct BrowserDetail: View {
                 .disabled(browser.host == nil)
 
                 sortMenu
+
+                Menu {
+                    OverwritePolicyPicker(policy: Binding(
+                        get: { policy },
+                        set: { storedPolicy = $0.rawValue }
+                    ))
+                } label: {
+                    Label("Existing Files", systemImage: "doc.on.doc")
+                }
+                .disabled(browser.host == nil)
 
                 Button {
                     Task { await browser.disconnect() }

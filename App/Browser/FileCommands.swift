@@ -17,6 +17,8 @@ struct FileCommands {
 
     let browser: BrowserModel
     let transfers: TransferListModel?
+    /// What to do about files that already exist. Chosen by the user, read when a job is built.
+    let policy: OverwritePolicy
 
     /// Whether anything is selected to act on.
     var hasSelection: Bool { !browser.selectedItems.isEmpty }
@@ -33,10 +35,10 @@ struct FileCommands {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Download"
-        panel.message = "Choose where to save \(items.count) item(s)."
+        panel.message = "Choose where to save \(items.count) item(s). Existing files: \(Self.label(for: policy))."
 
         guard panel.runModal() == .OK, let destination = panel.url else { return }
-        guard let transfer = browser.makeDownload(of: items, to: destination) else { return }
+        guard let transfer = browser.makeDownload(of: items, to: destination, policy: policy) else { return }
 
         Task { await transfers?.start(transfer, title: title(for: items)) }
     }
@@ -52,12 +54,22 @@ struct FileCommands {
         panel.message = "Choose what to upload to \(browser.path.pathString)."
 
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-        guard let transfer = browser.makeUpload(of: panel.urls) else { return }
+        guard let transfer = browser.makeUpload(of: panel.urls, policy: policy) else { return }
 
         let name = panel.urls.count == 1
             ? panel.urls[0].lastPathComponent
             : "\(panel.urls.count) items"
         Task { await transfers?.start(transfer, title: name) }
+    }
+
+    /// Plain language for a policy, for menus and panel text.
+    static func label(for policy: OverwritePolicy) -> String {
+        switch policy {
+        case .resume: "resume or replace"
+        case .skip: "skip"
+        case .rename: "keep both"
+        case .overwrite: "always replace"
+        }
     }
 
     private func title(for items: [RemoteItem]) -> String {
@@ -93,5 +105,24 @@ struct FileCommandButtons: View {
             deleteTargets = commands.browser.selectedItems
         }
         .disabled(!commands.hasSelection)
+    }
+}
+
+/// Chooses what happens to files that already exist.
+///
+/// Until this existed every transfer used `.overwrite` silently, so downloading a file you already had
+/// destroyed the local copy without asking. The default is now `.resume`, which continues a partial
+/// file and leaves a complete one alone.
+struct OverwritePolicyPicker: View {
+
+    @Binding var policy: OverwritePolicy
+
+    var body: some View {
+        Picker("If a file already exists", selection: $policy) {
+            Text("Resume or replace").tag(OverwritePolicy.resume)
+            Text("Skip existing").tag(OverwritePolicy.skip)
+            Text("Keep both").tag(OverwritePolicy.rename)
+            Text("Always replace").tag(OverwritePolicy.overwrite)
+        }
     }
 }
