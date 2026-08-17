@@ -13,21 +13,6 @@ import Foundation
 import Testing
 @testable import DPPresentation
 
-/// A prompt that answers instantly, so connecting needs no user.
-private struct SilentPrompt: UserPrompt {
-    var credentials: Credentials? = .password(username: "duck", password: "hunter2")
-
-    func askHostKey(_ challenge: HostKeyChallenge, for host: RemoteHost) async -> HostKeyDecision {
-        .acceptOnce
-    }
-    func askCredentials(_ request: CredentialRequest) async -> Credentials? { credentials }
-}
-
-private struct MemoryFactory: SessionFactory {
-    let session: MemorySession
-    func makeSession(for host: RemoteHost) throws -> any Session { session }
-}
-
 @Suite("BrowserModel")
 @MainActor
 struct BrowserModelTests {
@@ -49,17 +34,10 @@ struct BrowserModelTests {
             await session.seed(directory: RemotePath("/srv/zeta"))
         }
 
-        let services = DriverProServices(
-            database: try Database(.memory, migrations: BookmarkStore.migrations),
-            credentials: InMemoryCredentialStore(),
-            knownHosts: KnownHostsStore(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
-                .appending(path: "kh-\(UUID().uuidString)")),
-            prompt: prompt,
-            sessionFactory: MemoryFactory(session: session)
+        let (services, _) = try await ServicesFixture.makeServices(
+            for: Self.host, prompt: prompt, session: session
         )
-
-        let model = BrowserModel(services: services)
-        return (model, session)
+        return (BrowserModel(services: services), session)
     }
 
     // MARK: - Connecting

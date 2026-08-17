@@ -21,7 +21,8 @@ public final class BrowserModel {
         case name, size, modified, permissions
     }
 
-    private let services: DriverProServices
+    /// Internal rather than private so `FileOperations.swift` can reach it.
+    let services: DriverProServices
 
     /// The connection being browsed, once one is open.
     public private(set) var host: RemoteHost?
@@ -30,10 +31,16 @@ public final class BrowserModel {
     /// Everything the server reported, before filtering or sorting.
     public private(set) var entries: [RemoteItem] = []
 
+    /// What the connected backend can do. Empty until connected.
+    ///
+    /// Read by the UI to decide which commands to offer at all, rather than offering them and failing
+    /// after the click.
+    public internal(set) var capabilities: SessionCapabilities = []
+
     /// Whether a listing is in flight.
     public private(set) var isLoading = false
     /// A message to show the user, or `nil`.
-    public private(set) var errorMessage: String?
+    public internal(set) var errorMessage: String?
 
     /// Whether dotfiles are shown.
     public var showsHiddenFiles = false
@@ -97,9 +104,10 @@ public final class BrowserModel {
 
         do {
             try await services.connect(to: host)
-            let start = try await services.withSession(for: host) { session in
-                try await session.defaultDirectory()
+            let (start, supported) = try await services.withSession(for: host) { session in
+                (try await session.defaultDirectory(), session.capabilities)
             }
+            capabilities = supported
             isLoading = false
             await navigate(to: start)
         } catch {
@@ -155,6 +163,7 @@ public final class BrowserModel {
     public func disconnect() async {
         await services.disconnectAll()
         host = nil
+        capabilities = []
         entries = []
         selection = []
         path = .root

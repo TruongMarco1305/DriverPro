@@ -140,6 +140,35 @@ public struct TransferReport: Hashable, Sendable {
 
     /// Whether everything that was attempted succeeded.
     public var isSuccess: Bool { failed == 0 && failure == nil && !wasCancelled }
+
+    /// Creates a report.
+    ///
+    /// Swift synthesises a memberwise initialiser, but it is `internal` for a `public` struct — so
+    /// without this, nothing outside `DPTransfer` could build one, including tests and any UI wanting a
+    /// placeholder.
+    ///
+    /// - Parameters:
+    ///   - transferred: Files moved.
+    ///   - skipped: Files left alone.
+    ///   - failed: Files that failed.
+    ///   - bytes: Total bytes written.
+    ///   - wasCancelled: Whether the run was stopped early.
+    ///   - failure: Why the transfer could not start at all, if it could not.
+    public init(
+        transferred: Int = 0,
+        skipped: Int = 0,
+        failed: Int = 0,
+        bytes: Int64 = 0,
+        wasCancelled: Bool = false,
+        failure: SessionError? = nil
+    ) {
+        self.transferred = transferred
+        self.skipped = skipped
+        self.failed = failed
+        self.bytes = bytes
+        self.wasCancelled = wasCancelled
+        self.failure = failure
+    }
 }
 
 /// What the UI observes while a transfer runs.
