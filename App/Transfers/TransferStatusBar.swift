@@ -17,20 +17,32 @@ struct TransferStatusBar: View {
 
     @State private var isHovered = false
 
+    /// What the bar says: what is moving, or what is waiting to be resumed.
+    private var label: String {
+        guard summary.activeCount == 0 else { return summary.title }
+        return summary.interruptedCount == 1
+            ? "\(summary.title) — interrupted"
+            : "\(summary.interruptedCount) interrupted transfers"
+    }
+
     var body: some View {
         Button(action: show) {
             HStack(spacing: 10) {
-                // Indeterminate when no total is known — a fraction there would be a guess.
-                if let fraction = summary.fraction {
+                if summary.activeCount == 0 {
+                    // Nothing is moving. A bar here would claim otherwise.
+                    Image(systemName: "pause.circle")
+                        .foregroundStyle(.orange)
+                } else if let fraction = summary.fraction {
                     ProgressView(value: fraction)
                         .frame(width: 120)
                 } else {
+                    // Indeterminate when no total is known — a fraction there would be a guess.
                     ProgressView()
                         .progressViewStyle(.linear)
                         .frame(width: 120)
                 }
 
-                Text(summary.title)
+                Text(label)
                     .font(.callout)
                     .lineLimit(1)
 
@@ -53,6 +65,8 @@ struct TransferStatusBar: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help("Show transfers (⌥⌘T)")
+        .help(summary.activeCount == 0
+              ? "Interrupted transfers are waiting — open Transfers to resume them (⌥⌘T)"
+              : "Show transfers (⌥⌘T)")
     }
 }

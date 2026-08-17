@@ -52,7 +52,7 @@ enum ServicesFixture {
         let backend = session ?? MemorySession(host: host)
 
         let services = DriverProServices(
-            database: try Database(.memory, migrations: BookmarkStore.migrations),
+            database: try Database(.memory, migrations: DriverProServices.migrations),
             credentials: InMemoryCredentialStore(),
             knownHosts: KnownHostsStore(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appending(path: "dp-kh-\(UUID().uuidString)")),

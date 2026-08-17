@@ -19,6 +19,12 @@ struct TransfersWindow: View {
                     TransferRow(row: row, transfers: transfers)
                 }
                 .toolbar {
+                    Button("Resume All") {
+                        Task { await transfers.resumeAll() }
+                    }
+                    .help("Start every transfer interrupted by a quit")
+                    .disabled(!transfers.rows.contains { $0.isInterrupted })
+
                     Button("Clear Finished") { transfers.clearFinished() }
                         .help("Remove every transfer that has ended")
                         .disabled(!transfers.rows.contains { $0.isFinished })
@@ -48,7 +54,12 @@ private struct TransferRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title).lineLimit(1)
 
-                if let report = row.report {
+                if row.isInterrupted {
+                    // No bar: this one is standing still until the user says otherwise.
+                    Text(interruptedDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let report = row.report {
                     Text(summary(report))
                         .font(.caption)
                         .foregroundStyle(report.isSuccess ? .secondary : Color.red)
@@ -68,7 +79,20 @@ private struct TransferRow: View {
 
             Spacer()
 
-            if row.isFinished {
+            if row.isInterrupted {
+                Button("Resume") {
+                    Task { await transfers.resume(row.id) }
+                }
+                .help("Continue this transfer where it left off")
+
+                Button {
+                    Task { await transfers.dismiss(row.id) }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Forget this transfer")
+            } else if row.isFinished {
                 Button {
                     Task { await transfers.dismiss(row.id) }
                 } label: {
@@ -86,7 +110,15 @@ private struct TransferRow: View {
         .padding(.vertical, 4)
     }
 
+    /// What an interrupted row says instead of a progress bar.
+    private var interruptedDetail: String {
+        guard row.transferredBytes > 0 else { return "Interrupted" }
+        let moved = ByteCountFormatter.string(fromByteCount: row.transferredBytes, countStyle: .file)
+        return "Interrupted — \(moved) transferred"
+    }
+
     private var tint: Color {
+        if row.isInterrupted { return .orange }
         guard let report = row.report else { return .accentColor }
         return report.isSuccess ? .secondary : .red
     }

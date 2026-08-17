@@ -4,6 +4,7 @@
 //
 
 import DPCore
+import DPServices
 import DPTransfer
 import Foundation
 import Testing
@@ -272,6 +273,116 @@ struct TransferListModelTests {
         #expect(summary.fraction == nil)
 
         firstFeed.finish(); secondFeed.finish(); thirdFeed.finish()
+    }
+
+    // MARK: - Restoring
+
+    /// A model, plus the journal behind it, so a quit can be simulated by writing to the journal
+    /// directly rather than by killing a process.
+    private func makeModelWithJournal() async throws -> (TransferListModel, DriverProServices) {
+        let (services, _) = try await ServicesFixture.makeServices(
+            for: Self.host, prompt: SilentPrompt()
+        )
+        return (TransferListModel(services: services), services)
+    }
+
+    private func makeTransfer() -> Transfer {
+        Transfer(host: Self.host,
+                 work: .download(sources: [RemotePath("/srv/a.txt")],
+                                 destination: URL(fileURLWithPath: "/tmp")),
+                 overwritePolicy: .resume)
+    }
+
+    @Test("An interrupted transfer comes back as a row, and nothing reconnects")
+    func restoresInterrupted() async throws {
+        let (model, services) = try await makeModelWithJournal()
+        let transfer = makeTransfer()
+        try await services.journal.record(transfer, title: "a.txt")
+        try await services.journal.updateCounters(
+            for: transfer.id, report: TransferReport(transferred: 2, bytes: 1_024))
+
+        await model.restore()
+
+        let row = try #require(model.rows.first)
+        #expect(row.id == transfer.id)
+        #expect(row.title == "a.txt")
+        #expect(row.isInterrupted)
+        #expect(!row.isFinished)
+        #expect(row.transferredBytes == 1_024, "how far it got, so the row is not blank")
+        #expect(!model.hasActiveTransfers, "waiting is not running")
+    }
+
+    @Test("Restoring twice does not duplicate a row")
+    func restoreIsIdempotent() async throws {
+        // The journal also holds transfers that are running right now, so a second call must not add
+        // a second row for them.
+        let (model, services) = try await makeModelWithJournal()
+        try await services.journal.record(makeTransfer(), title: "a.txt")
+
+        await model.restore()
+        await model.restore()
+
+        #expect(model.rows.count == 1)
+    }
+
+    @Test("An interrupted transfer is reported as waiting, not as moving bytes")
+    func summaryDistinguishesInterrupted() async throws {
+        let (model, services) = try await makeModelWithJournal()
+        try await services.journal.record(makeTransfer(), title: "a.txt")
+        await model.restore()
+
+        let summary = try #require(model.activeSummary)
+        #expect(summary.activeCount == 0)
+        #expect(summary.interruptedCount == 1)
+        #expect(summary.fraction == nil, "a bar would claim movement that is not happening")
+        #expect(summary.title == "a.txt")
+    }
+
+    @Test("Resuming runs it again and the row stops being interrupted")
+    func resumingRunsIt() async throws {
+        let (model, services) = try await makeModelWithJournal()
+        let transfer = makeTransfer()
+        try await services.journal.record(transfer, title: "a.txt")
+        await model.restore()
+
+        await model.resume(transfer.id)
+        try await waitForFinish(model, id: transfer.id)
+
+        let row = try #require(model.rows.first { $0.id == transfer.id })
+        #expect(!row.isInterrupted)
+        #expect(row.isFinished, "it ran, whatever the outcome — the file is not on this fake server")
+        #expect(try await services.journal.unfinished().isEmpty, "and it is no longer pending")
+    }
+
+    @Test("Dismissing an interrupted transfer stops it coming back")
+    func dismissingForgetsIt() async throws {
+        let (model, services) = try await makeModelWithJournal()
+        let transfer = makeTransfer()
+        try await services.journal.record(transfer, title: "a.txt")
+        await model.restore()
+
+        await model.dismiss(transfer.id)
+
+        #expect(model.rows.isEmpty)
+        #expect(try await services.journal.unfinished().isEmpty)
+
+        await model.restore()
+        #expect(model.rows.isEmpty, "dismissed means dismissed, across launches")
+    }
+
+    @Test("Resume All starts every waiting transfer")
+    func resumeAll() async throws {
+        let (model, services) = try await makeModelWithJournal()
+        let first = makeTransfer(), second = makeTransfer()
+        try await services.journal.record(first, title: "one")
+        try await services.journal.record(second, title: "two")
+        await model.restore()
+
+        await model.resumeAll()
+        try await waitForFinish(model, id: first.id)
+        try await waitForFinish(model, id: second.id)
+
+        #expect(!model.rows.contains { $0.isInterrupted })
     }
 
     @Test("Dismissing removes the row and cancels its consuming task")

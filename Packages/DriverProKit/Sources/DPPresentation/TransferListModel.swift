@@ -73,6 +73,12 @@ public final class TransferListModel {
         /// The tally, once the run has ended.
         public var report: TransferReport?
 
+        /// Whether this transfer was left unfinished by a quit and is waiting to be resumed.
+        ///
+        /// Distinct from "not finished": an interrupted transfer is standing still, so a progress bar
+        /// would be reporting movement that is not happening.
+        public var isInterrupted = false
+
         /// Whether the run has ended.
         public var isFinished: Bool { report != nil }
 
@@ -86,6 +92,9 @@ public final class TransferListModel {
     private let services: DriverProServices
     private var tasks: [UUID: Task<Void, Never>] = [:]
 
+    /// Transfers restored from the journal, held until the user resumes or dismisses them.
+    private var interrupted: [UUID: StoredTransfer] = [:]
+
     /// Transfers, newest first.
     public private(set) var rows: [Row] = []
 
@@ -96,7 +105,7 @@ public final class TransferListModel {
     }
 
     /// Whether anything is still running.
-    public var hasActiveTransfers: Bool { rows.contains { !$0.isFinished } }
+    public var hasActiveTransfers: Bool { rows.contains { !$0.isFinished && !$0.isInterrupted } }
 
     /// What the browser's status bar shows, or `nil` when nothing is running.
     ///
@@ -109,12 +118,22 @@ public final class TransferListModel {
         public let fraction: Double?
         /// How many transfers are running.
         public let activeCount: Int
+        /// How many are interrupted and waiting to be resumed.
+        public let interruptedCount: Int
     }
 
-    /// A one-line summary of everything in flight.
+    /// A one-line summary of everything in flight or waiting.
     public var activeSummary: ActiveSummary? {
-        let active = rows.filter { !$0.isFinished }
-        guard let first = active.first else { return nil }
+        let active = rows.filter { !$0.isFinished && !$0.isInterrupted }
+        let waiting = rows.filter(\.isInterrupted)
+
+        guard let first = active.first else {
+            // Nothing moving, but something is waiting: worth saying, with no bar — the status bar is
+            // how an interrupted transfer gets noticed at all, since no window opens itself.
+            guard let firstWaiting = waiting.first else { return nil }
+            return ActiveSummary(title: firstWaiting.title, fraction: nil,
+                                 activeCount: 0, interruptedCount: waiting.count)
+        }
 
         // Aggregate across transfers, but only when every one of them knows its total. Mixing a known
         // total with an unknown one would produce a bar that jumps when the unknown one finishes.
@@ -130,8 +149,51 @@ public final class TransferListModel {
         return ActiveSummary(
             title: first.currentItem ?? first.title,
             fraction: fraction,
-            activeCount: active.count
+            activeCount: active.count,
+            interruptedCount: waiting.count
         )
+    }
+
+    // MARK: - Restoring
+
+    /// Reloads transfers the journal says never finished, as rows waiting to be resumed.
+    ///
+    /// Nothing reconnects: an interrupted transfer sits until the user asks for it, so launching the app
+    /// never starts network activity or a password prompt on its own.
+    ///
+    /// Safe to call more than once — a transfer already on screen, including one running right now, is
+    /// not added a second time.
+    public func restore() async {
+        guard let stored = try? await services.journal.unfinished() else { return }
+        let known = Set(rows.map(\.id))
+
+        for item in stored where !known.contains(item.id) {
+            interrupted[item.id] = item
+            var row = Row(id: item.id, title: item.title, isDownload: item.transfer.isDownload)
+            row.isInterrupted = true
+            row.transferredBytes = item.report.bytes
+            rows.insert(row, at: 0)
+        }
+    }
+
+    /// Runs an interrupted transfer again.
+    ///
+    /// Not a rewind: the queue re-enumerates the sources and the transfer's ``OverwritePolicy`` decides
+    /// each file, so `.resume` continues a partial one and a file already complete costs nothing. See
+    /// `docs/decisions/010-queue-persistence.md`.
+    ///
+    /// - Parameter id: Which transfer.
+    public func resume(_ id: UUID) async {
+        guard let stored = interrupted.removeValue(forKey: id) else { return }
+        rows.removeAll { $0.id == id }
+
+        let stream = await services.queue.run(stored.transfer, title: stored.title)
+        consume(stream, id: id, title: stored.title, isDownload: stored.transfer.isDownload)
+    }
+
+    /// Runs every interrupted transfer again.
+    public func resumeAll() async {
+        for id in interrupted.keys { await resume(id) }
     }
 
     // MARK: - Running
@@ -142,7 +204,9 @@ public final class TransferListModel {
     ///   - transfer: What to move.
     ///   - title: What to call it in the list.
     public func start(_ transfer: Transfer, title: String) async {
-        let stream = await services.queue.run(transfer)
+        // The title goes to the queue as well as the row: the journal stores it, so a transfer restored
+        // after a quit is still called what the user saw it called.
+        let stream = await services.queue.run(transfer, title: title)
         consume(stream, id: transfer.id, title: title, isDownload: transfer.isDownload)
     }
 
@@ -212,6 +276,11 @@ public final class TransferListModel {
         tasks[id]?.cancel()
         tasks[id] = nil
         rows.removeAll { $0.id == id }
+
+        // Forgotten in the journal too, or an interrupted transfer the user dismissed would come back
+        // at the next launch.
+        interrupted[id] = nil
+        try? await services.journal.forget(id)
     }
 
     /// Removes every finished row.

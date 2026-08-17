@@ -30,6 +30,11 @@ struct BrowserWindow: View {
                 )
             }
         }
+        // Transfers left unfinished by the last quit reappear here as rows waiting to be resumed. On
+        // the main window rather than the transfers window, which may never be opened.
+        .task {
+            await environment.transfers?.restore()
+        }
         .sheet(item: $environment.connectionSheet) { mode in
             ConnectionSheet(mode: mode)
         }
