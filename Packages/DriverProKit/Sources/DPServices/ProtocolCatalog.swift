@@ -39,35 +39,48 @@ public struct ProtocolDescriptor: Hashable, Sendable, Identifiable {
 
     /// Which protocol this describes.
     public let id: ProtocolIdentifier
-    /// Name to show in a picker, such as `"SFTP (SSH File Transfer)"`.
+    /// Name to show in a picker, such as `"SFTP"`.
     public let displayName: String
+    /// One sentence saying what this protocol is for, shown beneath the name in the chooser.
+    public let summary: String
     /// URL scheme, used in window titles and Keychain items.
     public let scheme: String
     /// Port used when the user does not give one.
     public let defaultPort: Int
     /// Fields the connection form should offer.
     public let fields: Set<ProtocolField>
+    /// SF Symbol representing this protocol in the sidebar.
+    ///
+    /// On the descriptor rather than in the view, for the same reason as ``fields``: adding WebDAV
+    /// should mean adding a row here, not a `switch` in the sidebar.
+    public let iconName: String
 
     /// Creates a descriptor.
     ///
     /// - Parameters:
     ///   - id: The protocol.
     ///   - displayName: Name for a picker.
+    ///   - summary: One sentence saying what the protocol is for.
     ///   - scheme: URL scheme.
     ///   - defaultPort: Default TCP port.
     ///   - fields: Fields the form should offer.
+    ///   - iconName: SF Symbol for the sidebar.
     public init(
         id: ProtocolIdentifier,
         displayName: String,
+        summary: String,
         scheme: String,
         defaultPort: Int,
-        fields: Set<ProtocolField>
+        fields: Set<ProtocolField>,
+        iconName: String
     ) {
         self.id = id
         self.displayName = displayName
+        self.summary = summary
         self.scheme = scheme
         self.defaultPort = defaultPort
         self.fields = fields
+        self.iconName = iconName
     }
 }
 
@@ -92,10 +105,12 @@ public struct ProtocolCatalog: Sendable {
     public static let live = ProtocolCatalog(descriptors: [
         ProtocolDescriptor(
             id: .sftp,
-            displayName: "SFTP (SSH File Transfer)",
+            displayName: "SFTP",
+            summary: "Secure file transfer over an SSH connection. The usual choice for Linux and Unix servers.",
             scheme: "sftp",
             defaultPort: 22,
-            fields: [.username, .password, .privateKey, .defaultPath]
+            fields: [.username, .password, .privateKey, .defaultPath],
+            iconName: "server.rack"
         )
     ])
 

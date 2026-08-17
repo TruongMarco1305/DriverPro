@@ -166,7 +166,14 @@ struct ProtocolCatalogTests {
     func describesSFTP() throws {
         let descriptor = try #require(ProtocolCatalog.live.descriptor(for: .sftp))
 
-        #expect(descriptor.displayName.contains("SFTP"))
+        #expect(descriptor.displayName == "SFTP", "the protocol name alone is enough")
+        #expect(!descriptor.iconName.isEmpty, "the sidebar needs an icon per protocol")
+
+        // The chooser draws both for every row, so a missing one is a blank space rather than an error.
+        for entry in ProtocolCatalog.live.descriptors {
+            #expect(!entry.iconName.isEmpty, "\(entry.displayName) has no icon")
+            #expect(!entry.summary.isEmpty, "\(entry.displayName) has no summary")
+        }
         #expect(descriptor.scheme == "sftp")
         #expect(descriptor.defaultPort == 22)
         #expect(descriptor.fields.contains(.username))
