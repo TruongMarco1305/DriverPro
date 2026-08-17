@@ -22,11 +22,6 @@ struct FileTable<Menu: View>: View {
                     Image(systemName: icon(for: item))
                         .foregroundStyle(item.isDirectory ? Color.accentColor : .secondary)
                 }
-                // Double-clicking a folder descends. Files do nothing yet — opening one is a
-                // transfer, which lands in part 2b.
-                .onTapGesture(count: 2) {
-                    Task { await browser.open(item) }
-                }
             }
             .width(min: 200, ideal: 320)
 
@@ -53,7 +48,14 @@ struct FileTable<Menu: View>: View {
             .width(110)
         }
         .tableStyle(.inset)
-        .contextMenu { contextMenu() }
+        // `primaryAction` is the row's double-click, and it covers the whole row rather than only the
+        // text a tap gesture would sit on. The menu ignores the ids it is handed and reads the
+        // selection, which is what the toolbar's copy of these buttons acts on too.
+        .contextMenu(forSelectionType: RemotePath.self) { _ in
+            contextMenu()
+        } primaryAction: { ids in
+            Task { await browser.open(ids) }
+        }
     }
 
     private func icon(for item: RemoteItem) -> String {

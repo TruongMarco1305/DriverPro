@@ -8,6 +8,9 @@ import DPPresentation
 import SwiftUI
 
 /// The breadcrumb above the listing. Each component navigates to that directory.
+///
+/// The crumbs' text comes from `BrowserModel.breadcrumbLabel(for:)` — the root reads as the connection's
+/// name, which is a naming rule and so belongs in the model rather than here.
 struct PathBar: View {
 
     let browser: BrowserModel
@@ -21,11 +24,12 @@ struct PathBar: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
-                    Button(path.isRoot ? "/" : path.name) {
+                    Button(browser.breadcrumbLabel(for: path)) {
                         Task { await browser.navigate(to: path) }
                     }
                     .buttonStyle(.plain)
                     .fontWeight(path == browser.path ? .semibold : .regular)
+                    .help(path.pathString)
                 }
             }
             .padding(.horizontal, 12)

@@ -30,8 +30,8 @@ struct BrowserWindow: View {
                 )
             }
         }
-        .sheet(isPresented: $environment.isShowingConnectionSheet) {
-            ConnectionSheet()
+        .sheet(item: $environment.connectionSheet) { mode in
+            ConnectionSheet(mode: mode)
         }
         // One sheet driven by whatever the engine is currently asking. Setting it to nil means the
         // user dismissed without choosing, which the coordinator treats as a refusal.
@@ -55,6 +55,8 @@ private struct BrowserDetail: View {
     @Bindable var browser: BrowserModel
     let transfers: TransferListModel?
 
+    @Environment(\.openWindow) private var openWindow
+
     @State private var isCreatingFolder = false
     @State private var newFolderName = ""
     @State private var renameTarget: RemoteItem?
@@ -69,20 +71,39 @@ private struct BrowserDetail: View {
     }
 
     private var commands: FileCommands {
-        FileCommands(browser: browser, transfers: transfers, policy: policy)
+        FileCommands(browser: browser, transfers: transfers, policy: policy) {
+            openWindow(id: "transfers")
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            PathBar(browser: browser)
-            Divider()
-            FileTable(browser: browser) {
-                FileCommandButtons(
-                    commands: commands,
-                    isCreatingFolder: $isCreatingFolder,
-                    renameTarget: $renameTarget,
-                    deleteTargets: $deleteTargets
+            // Not merely covered: an empty table with a "/" path bar behind the placeholder suggests a
+            // connection that has nothing in it, which is a different thing from no connection.
+            if browser.host == nil {
+                ContentUnavailableView(
+                    "Not Connected",
+                    systemImage: "externaldrive.badge.wifi",
+                    description: Text("Choose a bookmark, or press ⌘K to open a connection.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                PathBar(browser: browser)
+                Divider()
+                FileTable(browser: browser) {
+                    FileCommandButtons(
+                        commands: commands,
+                        isCreatingFolder: $isCreatingFolder,
+                        renameTarget: $renameTarget,
+                        deleteTargets: $deleteTargets
+                    )
+                }
+            }
+
+            // Outside the branch: a transfer can still be finishing after a disconnect.
+            if let transfers, let summary = transfers.activeSummary {
+                Divider()
+                TransferStatusBar(summary: summary) { openWindow(id: "transfers") }
             }
         }
         .toolbar {
@@ -103,6 +124,7 @@ private struct BrowserDetail: View {
                 } label: {
                     Label("Enclosing Folder", systemImage: "chevron.up")
                 }
+                .help("Go to the enclosing folder")
                 .disabled(!browser.canGoUp || browser.host == nil)
 
                 Button {
@@ -110,11 +132,13 @@ private struct BrowserDetail: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .help("Reload this folder from the server")
                 .disabled(browser.host == nil)
 
                 Toggle(isOn: $browser.showsHiddenFiles) {
                     Label("Hidden Files", systemImage: "eye")
                 }
+                .help(browser.showsHiddenFiles ? "Hide dotfiles" : "Show hidden files")
                 .disabled(browser.host == nil)
 
                 sortMenu
@@ -127,6 +151,7 @@ private struct BrowserDetail: View {
                 } label: {
                     Label("Existing Files", systemImage: "doc.on.doc")
                 }
+                .help("Choose what happens to files that already exist")
                 .disabled(browser.host == nil)
 
                 Button {
@@ -134,16 +159,8 @@ private struct BrowserDetail: View {
                 } label: {
                     Label("Disconnect", systemImage: "eject")
                 }
+                .help("Close this connection")
                 .disabled(browser.host == nil)
-            }
-        }
-        .overlay {
-            if browser.host == nil {
-                ContentUnavailableView(
-                    "Not Connected",
-                    systemImage: "externaldrive.badge.wifi",
-                    description: Text("Choose a bookmark, or press ⌘K to open a connection.")
-                )
             }
         }
         .overlay(alignment: .top) {
@@ -236,6 +253,7 @@ private struct BrowserDetail: View {
         } label: {
             Label("Sort", systemImage: "arrow.up.arrow.down")
         }
+        .help("Choose how the listing is ordered")
         .disabled(browser.host == nil)
     }
 }

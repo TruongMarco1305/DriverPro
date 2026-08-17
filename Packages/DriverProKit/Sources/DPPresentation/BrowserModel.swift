@@ -89,6 +89,17 @@ public final class BrowserModel {
     /// Every directory from the root to here, for the path bar.
     public var breadcrumb: [RemotePath] { path.ancestorsAndSelf }
 
+    /// What the path bar should call a crumb.
+    ///
+    /// The root reads as the connection's name rather than `/`, so the trail says which server you are
+    /// on as well as where you are inside it. Naming, not layout, so it lives here and is tested.
+    ///
+    /// - Parameter path: The crumb.
+    public func breadcrumbLabel(for path: RemotePath) -> String {
+        guard path.isRoot else { return path.name }
+        return host?.displayName ?? "/"
+    }
+
     /// Whether there is a parent to go up to.
     public var canGoUp: Bool { !path.isRoot }
 
@@ -146,6 +157,19 @@ public final class BrowserModel {
     public func open(_ item: RemoteItem) async {
         guard item.isDirectory else { return }
         await navigate(to: item.path)
+    }
+
+    /// Opens rows the table reports as activated, by their ids.
+    ///
+    /// The table's double-click hands back a selection rather than a row, so resolving it is decided
+    /// here: exactly one directory opens, and anything else — a file, several rows, a stale id — does
+    /// nothing rather than guessing which one was meant.
+    ///
+    /// - Parameter ids: Paths of the activated rows.
+    public func open(_ ids: Set<RemotePath>) async {
+        guard ids.count == 1, let id = ids.first,
+              let item = entries.first(where: { $0.path == id }) else { return }
+        await open(item)
     }
 
     /// Goes to the parent directory.

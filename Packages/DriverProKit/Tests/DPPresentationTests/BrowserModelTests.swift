@@ -164,6 +164,42 @@ struct BrowserModelTests {
         #expect(model.breadcrumb.map(\.pathString) == ["/", "/srv", "/srv/zeta"])
     }
 
+    @Test("The root crumb names the connection, so the trail says which server this is")
+    func breadcrumbLabelsTheConnection() async throws {
+        let (model, _) = try await makeModel()
+        #expect(model.breadcrumbLabel(for: .root) == "/", "nothing to name before connecting")
+
+        await model.connect(to: Self.host)
+        await model.navigate(to: RemotePath("/srv/zeta"))
+
+        // No nickname on this fixture, so displayName falls back to the user name.
+        #expect(model.breadcrumbLabel(for: .root) == "duck")
+        #expect(model.breadcrumbLabel(for: RemotePath("/srv")) == "srv")
+        #expect(model.breadcrumbLabel(for: RemotePath("/srv/zeta")) == "zeta")
+    }
+
+    @Test("Activating a row opens it only when it is exactly one directory")
+    func openingByID() async throws {
+        // The table's double-click reports a selection, not a row, so the model decides what that means.
+        let (model, _) = try await makeModel()
+        await model.connect(to: Self.host)
+        await model.navigate(to: RemotePath("/srv"))
+
+        await model.open([RemotePath("/srv/zeta")])
+        #expect(model.path == RemotePath("/srv/zeta"))
+
+        await model.navigate(to: RemotePath("/srv"))
+        await model.open([RemotePath("/srv/beta.txt")])
+        #expect(model.path == RemotePath("/srv"), "opening a file is a transfer, not navigation")
+
+        await model.open([RemotePath("/srv/zeta"), RemotePath("/srv/beta.txt")])
+        #expect(model.path == RemotePath("/srv"), "two rows gives no row to open")
+
+        await model.open([])
+        await model.open([RemotePath("/srv/vanished")])
+        #expect(model.path == RemotePath("/srv"))
+    }
+
     @Test("A failed listing keeps the previous one on screen")
     func failedListingKeepsEntries() async throws {
         // Blanking the table because one listing failed loses the user's place for no reason.
