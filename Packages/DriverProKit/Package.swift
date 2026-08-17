@@ -39,7 +39,10 @@ let package = Package(
     dependencies: [
         // Citadel wraps swift-nio-ssh and adds the SFTP subsystem. Verified to build under Swift 6
         // strict concurrency by a throwaway spike before being adopted.
-        .package(url: "https://github.com/orlandos-nl/Citadel.git", from: "0.12.1")
+        //
+        // Pinned exactly, not `from:`. Citadel depends on a *fork* of swift-nio-ssh, so a minor bump
+        // could change the SSH transport underneath us without review. See ADR 009.
+        .package(url: "https://github.com/orlandos-nl/Citadel.git", exact: "0.12.1")
 
         // Soto -> DPProtocolS3 (M4)
     ],
