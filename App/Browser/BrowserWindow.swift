@@ -20,7 +20,7 @@ struct BrowserWindow: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             if let browser = environment.browser {
-                BrowserDetail(browser: browser)
+                BrowserDetail(browser: browser, transfers: environment.transfers)
             } else {
                 ContentUnavailableView(
                     "DriverPro could not start",
@@ -52,15 +52,44 @@ struct BrowserWindow: View {
 private struct BrowserDetail: View {
 
     @Bindable var browser: BrowserModel
+    let transfers: TransferListModel?
+
+    @State private var isCreatingFolder = false
+    @State private var newFolderName = ""
+    @State private var renameTarget: RemoteItem?
+    @State private var renameText = ""
+    @State private var deleteTargets: [RemoteItem] = []
+
+    private var commands: FileCommands {
+        FileCommands(browser: browser, transfers: transfers)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             PathBar(browser: browser)
             Divider()
-            FileTable(browser: browser)
+            FileTable(browser: browser) {
+                FileCommandButtons(
+                    commands: commands,
+                    isCreatingFolder: $isCreatingFolder,
+                    renameTarget: $renameTarget,
+                    deleteTargets: $deleteTargets
+                )
+            }
         }
         .toolbar {
             ToolbarItemGroup {
+                FileCommandButtons(
+                    commands: commands,
+                    isCreatingFolder: $isCreatingFolder,
+                    renameTarget: $renameTarget,
+                    deleteTargets: $deleteTargets
+                )
+                .labelStyle(.iconOnly)
+                .disabled(browser.host == nil)
+
+                Divider()
+
                 Button {
                     Task { await browser.goUp() }
                 } label: {
@@ -102,6 +131,47 @@ private struct BrowserDetail: View {
         .overlay(alignment: .top) {
             if browser.isLoading { ProgressView().controlSize(.small).padding(6) }
         }
+        .alert("New Folder", isPresented: $isCreatingFolder) {
+            TextField("Name", text: $newFolderName)
+            Button("Cancel", role: .cancel) { newFolderName = "" }
+            Button("Create") {
+                let name = newFolderName
+                newFolderName = ""
+                Task { await browser.createDirectory(named: name) }
+            }
+        }
+        .alert("Rename", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+            Button("Rename") {
+                if let target = renameTarget {
+                    let name = renameText
+                    Task { await browser.rename(target, to: name) }
+                }
+                renameTarget = nil
+            }
+        }
+        .onChange(of: renameTarget?.id) { renameText = renameTarget?.name ?? "" }
+        .confirmationDialog(
+            deleteMessage,
+            isPresented: Binding(
+                get: { !deleteTargets.isEmpty },
+                set: { if !$0 { deleteTargets = [] } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                let targets = deleteTargets
+                deleteTargets = []
+                Task { await browser.delete(targets) }
+            }
+            Button("Cancel", role: .cancel) { deleteTargets = [] }
+        } message: {
+            Text("This cannot be undone.")
+        }
         .alert(
             "Something went wrong",
             isPresented: Binding(
@@ -113,6 +183,17 @@ private struct BrowserDetail: View {
         } message: {
             Text(browser.errorMessage ?? "")
         }
+    }
+
+    /// Names exactly what will be removed, so a destructive confirmation is not a blank cheque.
+    private var deleteMessage: String {
+        if deleteTargets.count == 1 {
+            let item = deleteTargets[0]
+            return item.isDirectory
+                ? "Delete “\(item.name)” and everything inside it?"
+                : "Delete “\(item.name)”?"
+        }
+        return "Delete \(deleteTargets.count) items?"
     }
 
     /// Sorting lives in a menu rather than in clickable headers.

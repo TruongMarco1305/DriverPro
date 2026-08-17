@@ -20,7 +20,7 @@ struct DriverProApp: App {
         WindowGroup("DriverPro") {
             BrowserWindow()
                 .environment(environment)
-                .frame(minWidth: 820, minHeight: 480)
+                .frame(minWidth: 860, minHeight: 500)
         }
         .commands {
             CommandGroup(after: .newItem) {
@@ -28,6 +28,15 @@ struct DriverProApp: App {
                     .keyboardShortcut("k")
             }
         }
+
+        // A separate window rather than a panel, so transfers keep running and stay watchable while
+        // browsing continues.
+        Window("Transfers", id: "transfers") {
+            TransfersWindow()
+                .environment(environment)
+                .frame(minWidth: 520, minHeight: 260)
+        }
+        .keyboardShortcut("t", modifiers: [.command, .option])
     }
 }
 
@@ -46,6 +55,7 @@ final class AppEnvironment {
     private(set) var services: DriverProServices?
     private(set) var browser: BrowserModel?
     private(set) var bookmarks: BookmarkListModel?
+    private(set) var transfers: TransferListModel?
 
     /// Why the app could not start, if it could not.
     private(set) var startupError: String?
@@ -59,6 +69,7 @@ final class AppEnvironment {
             self.services = services
             self.browser = BrowserModel(services: services)
             self.bookmarks = BookmarkListModel(store: services.bookmarks)
+            self.transfers = TransferListModel(services: services)
         } catch {
             startupError = "DriverPro could not open its database.\n\n\(error.localizedDescription)"
         }

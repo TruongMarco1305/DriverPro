@@ -8,9 +8,10 @@ import DPPresentation
 import SwiftUI
 
 /// The directory listing.
-struct FileTable: View {
+struct FileTable<Menu: View>: View {
 
     @Bindable var browser: BrowserModel
+    @ViewBuilder let contextMenu: () -> Menu
 
     var body: some View {
         Table(browser.visibleItems, selection: $browser.selection) {
@@ -52,6 +53,7 @@ struct FileTable: View {
             .width(110)
         }
         .tableStyle(.inset)
+        .contextMenu { contextMenu() }
     }
 
     private func icon(for item: RemoteItem) -> String {

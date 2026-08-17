@@ -37,6 +37,8 @@ targets:
         product: DPCore
       - package: DriverProKit
         product: DPBookmarks
+      - package: DriverProKit
+        product: DPTransfer
 
     info:
       path: App/Resources/Info.plist
