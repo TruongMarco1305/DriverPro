@@ -98,6 +98,42 @@ public final class TransferListModel {
     /// Whether anything is still running.
     public var hasActiveTransfers: Bool { rows.contains { !$0.isFinished } }
 
+    /// What the browser's status bar shows, or `nil` when nothing is running.
+    ///
+    /// Computed rather than stored: it reads rows whose progress is already coalesced, so it inherits
+    /// that throttling instead of needing its own.
+    public struct ActiveSummary: Hashable, Sendable {
+        /// The file moving now, or the transfer's name before one starts.
+        public let title: String
+        /// Overall progress, or `nil` when any running transfer has no known total.
+        public let fraction: Double?
+        /// How many transfers are running.
+        public let activeCount: Int
+    }
+
+    /// A one-line summary of everything in flight.
+    public var activeSummary: ActiveSummary? {
+        let active = rows.filter { !$0.isFinished }
+        guard let first = active.first else { return nil }
+
+        // Aggregate across transfers, but only when every one of them knows its total. Mixing a known
+        // total with an unknown one would produce a bar that jumps when the unknown one finishes.
+        let totals = active.map(\.totalBytes)
+        let fraction: Double? = {
+            guard !totals.contains(where: { $0 == nil }) else { return nil }
+            let total = totals.compactMap { $0 }.reduce(0, +)
+            guard total > 0 else { return nil }
+            let moved = active.map(\.transferredBytes).reduce(0, +)
+            return min(1, Double(moved) / Double(total))
+        }()
+
+        return ActiveSummary(
+            title: first.currentItem ?? first.title,
+            fraction: fraction,
+            activeCount: active.count
+        )
+    }
+
     // MARK: - Running
 
     /// Starts a transfer and adds a row for it.

@@ -20,6 +20,7 @@ struct TransfersWindow: View {
                 }
                 .toolbar {
                     Button("Clear Finished") { transfers.clearFinished() }
+                        .help("Remove every transfer that has ended")
                         .disabled(!transfers.rows.contains { $0.isFinished })
                 }
             } else {
@@ -74,11 +75,12 @@ private struct TransferRow: View {
                     Image(systemName: "xmark.circle.fill")
                 }
                 .buttonStyle(.borderless)
-                .help("Remove")
+                .help("Remove from the list")
             } else {
                 Button("Cancel") {
                     Task { await transfers.cancel(row.id) }
                 }
+                .help("Stop this transfer")
             }
         }
         .padding(.vertical, 4)

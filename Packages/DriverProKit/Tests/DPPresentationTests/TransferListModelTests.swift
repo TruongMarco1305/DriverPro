@@ -100,7 +100,15 @@ struct TransferListModelTests {
 
     /// Waits until the consuming task has drained the stream.
     private func waitForFinish(_ model: TransferListModel, id: UUID) async throws {
-        for _ in 0..<200 where model.rows.first(where: { $0.id == id })?.isFinished != true {
+        try await waitUntil { model.rows.first(where: { $0.id == id })?.isFinished == true }
+    }
+
+    /// Waits for a condition, since events are applied by a background task rather than on return.
+    ///
+    /// Polls rather than sleeping a fixed time: the condition is what the test means, and a fixed sleep
+    /// is either flaky or slow.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<200 where !condition() {
             try await Task.sleep(for: .milliseconds(5))
         }
     }
@@ -195,6 +203,75 @@ struct TransferListModelTests {
         model.consume(stream([.finished(TransferReport())]), id: second, title: "second", isDownload: true)
 
         #expect(model.rows.map(\.title) == ["second", "first"])
+    }
+
+    @Test("Nothing running means no status bar")
+    func summaryIsNilWhenIdle() async throws {
+        let model = try await makeModel()
+        #expect(model.activeSummary == nil)
+    }
+
+    @Test("A finished transfer stops appearing in the status bar")
+    func summaryIgnoresFinished() async throws {
+        let model = try await makeModel()
+        let id = UUID()
+        model.consume(stream([.finished(TransferReport(transferred: 1))]), id: id,
+                      title: "done", isDownload: true)
+        try await waitForFinish(model, id: id)
+
+        #expect(model.activeSummary == nil, "the bar should disappear once nothing is running")
+    }
+
+    @Test("The status bar names the file in flight and its overall progress")
+    func summaryReportsProgress() async throws {
+        let model = try await makeModel()
+        let (stream, continuation) = AsyncStream<TransferEvent>.makeStream()
+        model.consume(stream, id: UUID(), title: "batch", isDownload: true)
+
+        continuation.yield(.planned(items: 1, bytes: 1000))
+        continuation.yield(.itemStarted(makeItem("moving.txt")))
+        continuation.yield(.progress(bytes: 250, of: 1000))
+        try await waitUntil { model.rows.first?.transferredBytes == 250 }
+
+        let summary = try #require(model.activeSummary)
+        #expect(summary.title == "moving.txt", "the file, not the transfer, is what says where it is")
+        #expect(summary.fraction == 0.25)
+        #expect(summary.activeCount == 1)
+        continuation.finish()
+    }
+
+    @Test("Several transfers aggregate, and an unknown total makes the bar indeterminate")
+    func summaryAggregates() async throws {
+        let model = try await makeModel()
+        let (first, firstFeed) = AsyncStream<TransferEvent>.makeStream()
+        let (second, secondFeed) = AsyncStream<TransferEvent>.makeStream()
+
+        model.consume(first, id: UUID(), title: "one", isDownload: true)
+        model.consume(second, id: UUID(), title: "two", isDownload: false)
+
+        firstFeed.yield(.planned(items: 1, bytes: 100))
+        firstFeed.yield(.progress(bytes: 50, of: 100))
+        secondFeed.yield(.planned(items: 1, bytes: 100))
+        try await waitUntil {
+            model.rows.allSatisfy { $0.totalBytes == 100 } && model.rows.contains { $0.transferredBytes == 50 }
+        }
+
+        var summary = try #require(model.activeSummary)
+        #expect(summary.activeCount == 2)
+        #expect(summary.fraction == 0.25, "50 bytes of the 200 both transfers add up to")
+
+        // A transfer whose total is unknown makes the aggregate meaningless — counting it as zero would
+        // make the bar jump backwards the moment its size became known.
+        let (third, thirdFeed) = AsyncStream<TransferEvent>.makeStream()
+        model.consume(third, id: UUID(), title: "three", isDownload: true)
+        thirdFeed.yield(.planned(items: 1, bytes: nil))
+        try await waitUntil { model.rows.count == 3 && model.rows.allSatisfy { $0.plannedItems == 1 } }
+
+        summary = try #require(model.activeSummary)
+        #expect(summary.activeCount == 3)
+        #expect(summary.fraction == nil)
+
+        firstFeed.finish(); secondFeed.finish(); thirdFeed.finish()
     }
 
     @Test("Dismissing removes the row and cancels its consuming task")
