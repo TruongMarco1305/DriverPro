@@ -6,6 +6,7 @@
 import DPCore
 import DPPresentation
 import DPTransfer
+import QuickLook
 import SwiftUI
 
 /// The main window: bookmarks on the left, the current directory on the right.
@@ -66,6 +67,11 @@ private struct BrowserDetail: View {
     @State private var renameText = ""
     @State private var deleteTargets: [RemoteItem] = []
 
+    /// The local copy Quick Look is showing. Setting it opens the panel; clearing it closes.
+    @State private var previewURL: URL?
+    /// The file that was too big to preview, and its size.
+    @State private var oversizePreview: OversizePreview?
+
     /// Remembered across launches, so the choice is made once rather than every transfer.
     @AppStorage("overwritePolicy") private var storedPolicy = OverwritePolicy.resume.rawValue
 
@@ -78,6 +84,23 @@ private struct BrowserDetail: View {
     }
 
     var body: some View {
+        listing
+            .quickLookPreview($previewURL)
+            .toolbar { toolbarItems }
+            .modifier(BrowserDialogs(
+                browser: browser,
+                commands: commands,
+                isCreatingFolder: $isCreatingFolder,
+                newFolderName: $newFolderName,
+                renameTarget: $renameTarget,
+                renameText: $renameText,
+                deleteTargets: $deleteTargets,
+                oversizePreview: $oversizePreview
+            ))
+    }
+
+    /// The path bar and the listing, or the placeholder when there is no connection.
+    private var listing: some View {
         VStack(spacing: 0) {
             // Not merely covered: an empty table with a "/" path bar behind the placeholder suggests a
             // connection that has nothing in it, which is a different thing from no connection.
@@ -98,18 +121,24 @@ private struct BrowserDetail: View {
                         commands: commands,
                         isCreatingFolder: $isCreatingFolder,
                         renameTarget: $renameTarget,
-                        deleteTargets: $deleteTargets
+                        deleteTargets: $deleteTargets,
+                        preview: startPreview
                     )
                 }
             }
         }
-        .toolbar {
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+
             ToolbarItemGroup {
                 FileCommandButtons(
                     commands: commands,
                     isCreatingFolder: $isCreatingFolder,
                     renameTarget: $renameTarget,
-                    deleteTargets: $deleteTargets
+                    deleteTargets: $deleteTargets,
+                    preview: startPreview
                 )
                 .labelStyle(.iconOnly)
                 .disabled(browser.host == nil)
@@ -133,7 +162,7 @@ private struct BrowserDetail: View {
                 .disabled(browser.host == nil)
 
                 Toggle(isOn: $browser.showsHiddenFiles) {
-                    Label("Hidden Files", systemImage: "eye")
+                    Label("Hidden Files", systemImage: "line.3.horizontal.decrease.circle")
                 }
                 .help(browser.showsHiddenFiles ? "Hide dotfiles" : "Show hidden files")
                 .disabled(browser.host == nil)
@@ -163,73 +192,18 @@ private struct BrowserDetail: View {
                     TransfersButton(transfers: transfers)
                 }
             }
-        }
-        .overlay(alignment: .top) {
-            if browser.isLoading { ProgressView().controlSize(.small).padding(6) }
-        }
-        .alert("New Folder", isPresented: $isCreatingFolder) {
-            TextField("Name", text: $newFolderName)
-            Button("Cancel", role: .cancel) { newFolderName = "" }
-            Button("Create") {
-                let name = newFolderName
-                newFolderName = ""
-                Task { await browser.createDirectory(named: name) }
-            }
-        }
-        .alert("Rename", isPresented: Binding(
-            get: { renameTarget != nil },
-            set: { if !$0 { renameTarget = nil } }
-        )) {
-            TextField("Name", text: $renameText)
-            Button("Cancel", role: .cancel) { renameTarget = nil }
-            Button("Rename") {
-                if let target = renameTarget {
-                    let name = renameText
-                    Task { await browser.rename(target, to: name) }
-                }
-                renameTarget = nil
-            }
-        }
-        .onChange(of: renameTarget?.id) { renameText = renameTarget?.name ?? "" }
-        .confirmationDialog(
-            deleteMessage,
-            isPresented: Binding(
-                get: { !deleteTargets.isEmpty },
-                set: { if !$0 { deleteTargets = [] } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                let targets = deleteTargets
-                deleteTargets = []
-                Task { await browser.delete(targets) }
-            }
-            Button("Cancel", role: .cancel) { deleteTargets = [] }
-        } message: {
-            Text("This cannot be undone.")
-        }
-        .alert(
-            "Something went wrong",
-            isPresented: Binding(
-                get: { browser.errorMessage != nil },
-                set: { if !$0 { browser.dismissError() } }
-            )
-        ) {
-            Button("OK") { browser.dismissError() }
-        } message: {
-            Text(browser.errorMessage ?? "")
-        }
     }
 
-    /// Names exactly what will be removed, so a destructive confirmation is not a blank cheque.
-    private var deleteMessage: String {
-        if deleteTargets.count == 1 {
-            let item = deleteTargets[0]
-            return item.isDirectory
-                ? "Delete “\(item.name)” and everything inside it?"
-                : "Delete “\(item.name)”?"
+    /// Previews the first selected file, fetching it first.
+    private func startPreview() {
+        Task {
+            switch await commands.preview() {
+            case .ready(let url): previewURL = url
+            case .tooLarge(let name, let size):
+                oversizePreview = OversizePreview(name: name, size: size)
+            case .nothing: break
+            }
         }
-        return "Delete \(deleteTargets.count) items?"
     }
 
     /// Sorting lives in a menu rather than in clickable headers.
@@ -257,4 +231,123 @@ private struct BrowserDetail: View {
         .help("Choose how the listing is ordered")
         .disabled(browser.host == nil)
     }
+}
+
+/// Every alert and confirmation the browser puts up.
+///
+/// A `ViewModifier` rather than more modifiers on `BrowserDetail.body`: five dialogs in one expression
+/// is past what the type-checker will accept, and it reads better as one thing anyway.
+private struct BrowserDialogs: ViewModifier {
+
+    let browser: BrowserModel
+    let commands: FileCommands
+
+    @Binding var isCreatingFolder: Bool
+    @Binding var newFolderName: String
+    @Binding var renameTarget: RemoteItem?
+    @Binding var renameText: String
+    @Binding var deleteTargets: [RemoteItem]
+    @Binding var oversizePreview: OversizePreview?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .top) {
+            if browser.isLoading { ProgressView().controlSize(.small).padding(6) }
+        }
+            .alert("New Folder", isPresented: $isCreatingFolder) {
+            TextField("Name", text: $newFolderName)
+            Button("Cancel", role: .cancel) { newFolderName = "" }
+            Button("Create") {
+                let name = newFolderName
+                newFolderName = ""
+                Task { await browser.createDirectory(named: name) }
+            }
+        }
+            .alert("Rename", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+            Button("Rename") {
+                if let target = renameTarget {
+                    let name = renameText
+                    Task { await browser.rename(target, to: name) }
+                }
+                renameTarget = nil
+            }
+        }
+            .onChange(of: renameTarget?.id) { renameText = renameTarget?.name ?? "" }
+            .confirmationDialog(
+            deleteMessage,
+            isPresented: Binding(
+                get: { !deleteTargets.isEmpty },
+                set: { if !$0 { deleteTargets = [] } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                let targets = deleteTargets
+                deleteTargets = []
+                Task { await browser.delete(targets) }
+            }
+            Button("Cancel", role: .cancel) { deleteTargets = [] }
+        } message: {
+            Text("This cannot be undone.")
+        }
+            .alert(
+            "Something went wrong",
+            isPresented: Binding(
+                get: { browser.errorMessage != nil },
+                set: { if !$0 { browser.dismissError() } }
+            )
+        ) {
+            Button("OK") { browser.dismissError() }
+        } message: {
+            Text(browser.errorMessage ?? "")
+        }
+            .alert(
+                "Too large to preview",
+                isPresented: Binding(
+                    get: { oversizePreview != nil },
+                    set: { if !$0 { oversizePreview = nil } }
+                )
+            ) {
+                Button("Download…") {
+                    oversizePreview = nil
+                    commands.download()
+                }
+                Button("Cancel", role: .cancel) { oversizePreview = nil }
+            } message: {
+                Text(oversizeMessage)
+            }
+    }
+
+    /// Names the file and both sizes, so the refusal is a fact rather than a rule.
+    private var oversizeMessage: String {
+        guard let oversizePreview else { return "" }
+        let size = ByteCountFormatter.string(fromByteCount: oversizePreview.size, countStyle: .file)
+        let limit = ByteCountFormatter.string(fromByteCount: BrowserModel.previewSizeLimit,
+                                              countStyle: .file)
+        return "“\(oversizePreview.name)” is \(size). Files over \(limit) are too large to preview."
+    }
+
+    /// Names exactly what will be removed, so a destructive confirmation is not a blank cheque.
+    private var deleteMessage: String {
+        if deleteTargets.count == 1 {
+            let item = deleteTargets[0]
+            return item.isDirectory
+                ? "Delete “\(item.name)” and everything inside it?"
+                : "Delete “\(item.name)”?"
+        }
+        return "Delete \(deleteTargets.count) items?"
+    }
+}
+
+/// A file that could not be previewed, and why the message can say so.
+struct OversizePreview: Equatable {
+    /// What it is called.
+    let name: String
+    /// How big it turned out to be.
+    let size: Int64
 }

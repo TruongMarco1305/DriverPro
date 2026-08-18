@@ -136,6 +136,37 @@ extension BrowserModel {
         return makeUpload(of: urls, into: item.path, policy: policy)
     }
 
+    // MARK: - Previewing
+
+    /// Whether an entry can be shown in Quick Look, and why not when it cannot.
+    public enum PreviewDecision: Hashable, Sendable {
+        /// Fetch it and show it.
+        case ready
+        /// A directory. Space already means "open" for those.
+        case notAFile
+        /// Too big to be worth pulling down to look at, with its size for the message.
+        case tooLarge(Int64)
+    }
+
+    /// The largest file Quick Look will fetch.
+    ///
+    /// A preview is a glance, and a glance should not commit anyone to a multi-gigabyte download they
+    /// did not ask for. Named and asserted by value, so moving it is a deliberate edit.
+    public static let previewSizeLimit: Int64 = 500 * 1024 * 1024
+
+    /// Whether an entry can be previewed.
+    ///
+    /// A file the server gave no size for is allowed: refusing on missing information would block
+    /// previewing anything on a backend that does not report sizes, and the cost of being wrong is one
+    /// download that can be cancelled.
+    ///
+    /// - Parameter item: The row in question.
+    public func previewDecision(for item: RemoteItem) -> PreviewDecision {
+        guard !item.isDirectory else { return .notAFile }
+        guard let size = item.size, size > Self.previewSizeLimit else { return .ready }
+        return .tooLarge(size)
+    }
+
     /// The entries currently selected, in the order shown.
     public var selectedItems: [RemoteItem] {
         visibleItems.filter { selection.contains($0.path) }

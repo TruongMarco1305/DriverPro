@@ -23,6 +23,18 @@ struct FileCommands {
     /// Whether anything is selected to act on.
     var hasSelection: Bool { !browser.selectedItems.isEmpty }
 
+    /// Whether the selection is one previewable thing.
+    ///
+    /// Exactly one, because only the first of a selection previews — offering it for five would promise
+    /// something it does not do. A file too large to preview still counts: clicking it is how the user
+    /// finds out, and the alert offers Download.
+    var canPreview: Bool {
+        guard browser.selectedItems.count == 1, let item = browser.selectedItems.first else {
+            return false
+        }
+        return browser.previewDecision(for: item) != .notAFile
+    }
+
     // MARK: - Transfers
 
     /// Asks where to save, then starts a download of the selection.
@@ -84,6 +96,44 @@ struct FileCommands {
         start(transfer, title: name)
     }
 
+    // MARK: - Quick Look
+
+    /// What pressing Space produced.
+    enum PreviewOutcome {
+        /// A local copy, ready for the preview panel.
+        case ready(URL)
+        /// Too big to fetch for a glance.
+        case tooLarge(name: String, size: Int64)
+        /// Nothing to preview: no selection, or a folder.
+        case nothing
+    }
+
+    /// Fetches the first selected file so Quick Look can show it.
+    ///
+    /// The first only: previewing a multi-selection would mean fetching all of it, and a glance should
+    /// cost one file. A folder is skipped because Space would otherwise fight the double-click that
+    /// already opens it.
+    ///
+    /// - Returns: What to do next, for the view to act on.
+    func preview() async -> PreviewOutcome {
+        guard let item = browser.selectedItems.first else { return .nothing }
+
+        switch browser.previewDecision(for: item) {
+        case .notAFile:
+            return .nothing
+        case .tooLarge(let size):
+            return .tooLarge(name: item.name, size: size)
+        case .ready:
+            guard let url = try? await TemporaryCopy.fetch(item.path, named: item.name,
+                                                           purpose: "preview") else {
+                // The failure is already on screen as a failed row in the transfers panel; a second
+                // alert saying the same thing would be noise.
+                return .nothing
+            }
+            return .ready(url)
+        }
+    }
+
     /// Plain language for a policy, for menus and panel text.
     static func label(for policy: OverwritePolicy) -> String {
         switch policy {
@@ -106,8 +156,14 @@ struct FileCommandButtons: View {
     @Binding var isCreatingFolder: Bool
     @Binding var renameTarget: RemoteItem?
     @Binding var deleteTargets: [RemoteItem]
+    /// Fetches the selected file and shows it. Owned by the browser, which holds the panel's state.
+    let preview: () -> Void
 
     var body: some View {
+        Button("Preview", systemImage: "eye") { preview() }
+            .help("Look at the selected file without downloading it")
+            .disabled(!commands.canPreview)
+
         Button("Download", systemImage: "square.and.arrow.down") { commands.download() }
             .help("Download the selected items")
             .disabled(!commands.hasSelection)

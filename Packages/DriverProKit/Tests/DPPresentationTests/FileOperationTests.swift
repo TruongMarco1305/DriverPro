@@ -265,6 +265,35 @@ struct FileOperationTests {
         #expect(upload.overwritePolicy == policy)
     }
 
+    // MARK: - Previewing
+
+    @Test("What can be previewed, and what says so instead")
+    func previewDecisions() async throws {
+        let (model, _) = try await makeBrowser()
+        let limit = BrowserModel.previewSizeLimit
+
+        func item(_ name: String, kind: RemoteItem.Kind = .file, size: Int64?) -> RemoteItem {
+            RemoteItem(path: RemotePath("/srv/\(name)"), kind: kind, size: size)
+        }
+
+        #expect(model.previewDecision(for: item("small.txt", size: 1_024)) == .ready)
+        #expect(model.previewDecision(for: item("folder", kind: .directory, size: nil)) == .notAFile)
+
+        // A glance should not commit anyone to a multi-gigabyte download.
+        #expect(model.previewDecision(for: item("huge.bin", size: limit + 1)) == .tooLarge(limit + 1))
+        #expect(model.previewDecision(for: item("exact.bin", size: limit)) == .ready,
+                "the limit itself is allowed; only past it is not")
+
+        // Unknown size is not a reason to refuse: WebDAV and S3 may not report one.
+        #expect(model.previewDecision(for: item("unsized", size: nil)) == .ready)
+    }
+
+    @Test("The preview limit is 500 MB")
+    func previewLimitIsWhatWeSaid() {
+        // Asserted by value so changing it is a decision, not a drift.
+        #expect(BrowserModel.previewSizeLimit == 524_288_000)
+    }
+
     @Test("Nothing selected builds no transfer")
     func emptyBuildsNothing() async throws {
         let (model, _) = try await makeBrowser()

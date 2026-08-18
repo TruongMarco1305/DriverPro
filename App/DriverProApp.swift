@@ -67,7 +67,7 @@ final class AppEnvironment {
             self.transfers = TransferListModel(services: services)
             TerminationDelegate.shared = self
             // `Transferable`'s exporting closure is static, with nowhere to pass context through.
-            DragExport.environment = self
+            TemporaryCopy.environment = self
         } catch {
             startupError = "DriverPro could not open its database.\n\n\(error.localizedDescription)"
         }
@@ -116,8 +116,8 @@ final class TerminationDelegate: NSObject, NSApplicationDelegate {
         Task {
             defer { NSApp.reply(toApplicationShouldTerminate: true) }
             await services.disconnectAll()
-            // A drag cancelled part-way leaves its partial download behind; nothing else ever clears it.
-            DragExport.clearTemporaryFiles()
+            // A cancelled drag or a closed preview leaves its download behind; nothing else clears it.
+            TemporaryCopy.clearAll()
         }
         return .terminateLater
     }
