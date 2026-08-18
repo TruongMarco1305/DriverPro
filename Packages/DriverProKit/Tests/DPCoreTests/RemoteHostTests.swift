@@ -49,3 +49,25 @@ struct RemoteHostTests {
         #expect(makeHost().keychainAccount == "", "anonymous connections still need a key")
     }
 }
+
+@Suite("RemoteItem")
+struct RemoteItemTests {
+
+    @Test("A directory has no size, whatever the server said")
+    func directoriesHaveNoSize() {
+        // SFTP reports a folder's own inode — 4 KB on a typical Linux server. True, useless, and read
+        // by everyone as the size of the contents.
+        let directory = RemoteItem(path: RemotePath("/srv/photos"), kind: .directory, size: 4_096)
+        #expect(directory.size == nil)
+
+        let file = RemoteItem(path: RemotePath("/srv/a.txt"), kind: .file, size: 4_096)
+        #expect(file.size == 4_096, "files keep theirs")
+    }
+
+    @Test("A symbolic link keeps its size")
+    func linksKeepTheirSize() {
+        // A link's size is the length of its target path, which is real data about the link itself.
+        let link = RemoteItem(path: RemotePath("/srv/link"), kind: .symbolicLink(target: nil), size: 11)
+        #expect(link.size == 11)
+    }
+}

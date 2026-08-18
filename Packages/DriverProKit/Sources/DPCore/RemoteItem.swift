@@ -51,7 +51,11 @@ public struct RemoteItem: Hashable, Sendable, Identifiable {
     /// Whether this is a file, a directory, or a link.
     public var kind: Kind
 
-    /// Size in bytes, or `nil` when the server did not report one.
+    /// Size in bytes, or `nil` when the server did not report one — and always `nil` for a directory.
+    ///
+    /// A directory's reported size is its own inode: SFTP says 4 KB for every folder on a typical Linux
+    /// server, which is true and useless. It is not the size of the contents, so showing it invites
+    /// exactly the wrong reading, and the enforcing happens here rather than in each backend.
     ///
     /// `Int64` rather than `Int` because a 32-bit `Int` cannot hold the size of a large file, and
     /// rather than `UInt64` because arithmetic on unsigned sizes traps on underflow the first time you
@@ -89,7 +93,7 @@ public struct RemoteItem: Hashable, Sendable, Identifiable {
     /// - Parameters:
     ///   - path: The item's location.
     ///   - kind: File, directory, or symbolic link.
-    ///   - size: Size in bytes, if known.
+    ///   - size: Size in bytes, if known. Ignored for directories.
     ///   - modifiedAt: Last-modified date, if known.
     ///   - permissions: POSIX mode, if the backend has one.
     ///   - owner: Owning user name, if reported.
@@ -107,7 +111,7 @@ public struct RemoteItem: Hashable, Sendable, Identifiable {
     ) {
         self.path = path
         self.kind = kind
-        self.size = size
+        self.size = kind.isDirectory ? nil : size
         self.modifiedAt = modifiedAt
         self.permissions = permissions
         self.owner = owner
