@@ -32,15 +32,6 @@ struct DriverProApp: App {
                     .keyboardShortcut("k")
             }
         }
-
-        // A separate window rather than a panel, so transfers keep running and stay watchable while
-        // browsing continues.
-        Window("Transfers", id: "transfers") {
-            TransfersWindow()
-                .environment(environment)
-                .frame(minWidth: 520, minHeight: 260)
-        }
-        .keyboardShortcut("t", modifiers: [.command, .option])
     }
 }
 
@@ -75,6 +66,8 @@ final class AppEnvironment {
             self.bookmarks = BookmarkListModel(store: services.bookmarks)
             self.transfers = TransferListModel(services: services)
             TerminationDelegate.shared = self
+            // `Transferable`'s exporting closure is static, with nowhere to pass context through.
+            DragExport.environment = self
         } catch {
             startupError = "DriverPro could not open its database.\n\n\(error.localizedDescription)"
         }
@@ -123,6 +116,8 @@ final class TerminationDelegate: NSObject, NSApplicationDelegate {
         Task {
             defer { NSApp.reply(toApplicationShouldTerminate: true) }
             await services.disconnectAll()
+            // A drag cancelled part-way leaves its partial download behind; nothing else ever clears it.
+            DragExport.clearTemporaryFiles()
         }
         return .terminateLater
     }

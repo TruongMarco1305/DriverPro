@@ -19,8 +19,6 @@ struct FileCommands {
     let transfers: TransferListModel?
     /// What to do about files that already exist. Chosen by the user, read when a job is built.
     let policy: OverwritePolicy
-    /// Brings the transfers window forward. Called when a transfer starts and none was running.
-    let showTransfers: () -> Void
 
     /// Whether anything is selected to act on.
     var hasSelection: Bool { !browser.selectedItems.isEmpty }
@@ -64,13 +62,26 @@ struct FileCommands {
         start(transfer, title: name)
     }
 
-    /// Queues a transfer, opening the transfers window if this is the first one.
+    /// Queues a transfer.
     ///
-    /// Only the first: bringing the window forward on every download would interrupt browsing.
+    /// Nothing is opened or brought forward: the toolbar's badge is how a transfer announces itself
+    /// now, which is a change the user can see without a window taking focus mid-browse.
     private func start(_ transfer: Transfer, title: String) {
-        let wasIdle = transfers?.rows.isEmpty ?? false
         Task { await transfers?.start(transfer, title: title) }
-        if wasIdle { showTransfers() }
+    }
+
+    /// Starts an upload of files dropped from Finder.
+    ///
+    /// - Parameters:
+    ///   - urls: What was dropped.
+    ///   - item: The folder row it landed on, or `nil` for the directory being shown.
+    func upload(dropped urls: [URL], onto item: RemoteItem?) {
+        let transfer = item.map { browser.makeUpload(of: urls, onto: $0, policy: policy) }
+            ?? browser.makeUpload(of: urls, policy: policy)
+        guard let transfer else { return }
+
+        let name = urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) items"
+        start(transfer, title: name)
     }
 
     /// Plain language for a policy, for menus and panel text.

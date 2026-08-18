@@ -284,7 +284,7 @@ public actor TransferQueue {
                     emit(.itemStarted(item))
                     let outcome = await Self.move(
                         item, in: transfer, pool: pool,
-                        onBytes: { await progress.add($0) }
+                        onBytes: { await progress.add($0, for: item) }
                     )
                     return (item, outcome)
                 }
@@ -460,6 +460,7 @@ public actor TransferQueue {
 /// emissions were still in flight.
 private actor ProgressReporter {
     private var total: Int64 = 0
+    private var perItem: [RemotePath: Int64] = [:]
     private let grandTotal: Int64?
     private let emit: @Sendable (TransferEvent) -> Void
 
@@ -468,8 +469,17 @@ private actor ProgressReporter {
         self.emit = emit
     }
 
-    func add(_ bytes: Int) {
+    /// Counts bytes for one file and for the transfer, and says so.
+    ///
+    /// Both events are emitted here, in this order, for the same reason the count lives here: files
+    /// move concurrently, so the only place where "this file's total" and "the transfer's total" are
+    /// consistent with each other is inside the actor that owns them both.
+    func add(_ bytes: Int, for item: TransferItem) {
+        let moved = (perItem[item.remote] ?? 0) + Int64(bytes)
+        perItem[item.remote] = moved
         total += Int64(bytes)
+
+        emit(.itemProgress(item, bytes: moved))
         emit(.progress(bytes: total, of: grandTotal))
     }
 }

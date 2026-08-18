@@ -198,6 +198,11 @@ public enum TransferEvent: Sendable {
     case planned(items: Int, bytes: Int64?)
     /// A file started moving.
     case itemStarted(TransferItem)
+    /// Cumulative bytes for one file.
+    ///
+    /// Separate from ``progress(bytes:of:)`` because files move several at a time: a transfer-wide
+    /// total cannot be attributed back to any one of them, so a per-file bar needs its own count.
+    case itemProgress(TransferItem, bytes: Int64)
     /// Cumulative bytes across the whole transfer.
     case progress(bytes: Int64, of: Int64?)
     /// A file finished, one way or another.

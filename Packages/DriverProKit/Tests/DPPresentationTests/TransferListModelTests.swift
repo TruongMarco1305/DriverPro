@@ -101,7 +101,7 @@ struct TransferListModelTests {
 
     /// Waits until the consuming task has drained the stream.
     private func waitForFinish(_ model: TransferListModel, id: UUID) async throws {
-        try await waitUntil { model.rows.first(where: { $0.id == id })?.isFinished == true }
+        try await waitUntil { model.report(of: id) != nil }
     }
 
     /// Waits for a condition, since events are applied by a background task rather than on return.
@@ -114,7 +114,7 @@ struct TransferListModelTests {
         }
     }
 
-    @Test("A run produces one row that ends finished")
+    @Test("A file gets its own row, which ends done")
     func producesOneFinishedRow() async throws {
         let model = try await makeModel()
         let id = UUID()
@@ -123,76 +123,162 @@ struct TransferListModelTests {
         model.consume(stream([
             .planned(items: 1, bytes: 100),
             .itemStarted(item),
-            .progress(bytes: 100, of: 100),
+            .itemProgress(item, bytes: 100),
             .itemFinished(item, .transferred(bytes: 100)),
             .finished(TransferReport(transferred: 1, bytes: 100))
-        ]), id: id, title: "a.txt", isDownload: true)
+        ]), id: id, title: "a.txt", isDownload: true, connection: "Work")
 
         try await waitForFinish(model, id: id)
 
-        #expect(model.rows.count == 1)
+        #expect(model.rows.count == 1, "the placeholder is replaced by the file, not added to")
         let row = try #require(model.rows.first)
-        #expect(row.plannedItems == 1)
+        #expect(row.title == "a.txt")
+        #expect(row.connection == "Work", "a row says which connection it belongs to")
         #expect(row.transferredBytes == 100)
         #expect(row.fractionCompleted == 1)
-        #expect(row.report?.isSuccess == true)
-        #expect(row.currentItem == nil, "nothing is in flight once it has finished")
+        #expect(row.state == .done)
+        #expect(model.report(of: id)?.isSuccess == true)
     }
 
-    @Test("Progress never exceeds the total, and is nil when the total is unknown")
+    @Test("Every file in a transfer gets a row of its own")
+    func oneRowPerFile() async throws {
+        // The panel lists files, not jobs: a dragged folder of three shows three bars.
+        let model = try await makeModel()
+        let id = UUID()
+        let items = ["a.txt", "b.txt", "c.txt"].map { makeItem($0, size: 100) }
+
+        var events: [TransferEvent] = [.planned(items: 3, bytes: 300)]
+        for item in items {
+            events += [.itemStarted(item), .itemProgress(item, bytes: 100),
+                       .itemFinished(item, .transferred(bytes: 100))]
+        }
+        events.append(.finished(TransferReport(transferred: 3, bytes: 300)))
+
+        model.consume(stream(events), id: id, title: "3 items", isDownload: true)
+        try await waitForFinish(model, id: id)
+
+        #expect(model.rows.count == 3)
+        #expect(Set(model.rows.map(\.title)) == ["a.txt", "b.txt", "c.txt"])
+        #expect(model.rows.allSatisfy { $0.state == .done })
+        #expect(model.rows.allSatisfy { $0.transferID == id }, "all belong to the one transfer")
+    }
+
+    @Test("Files moving at once each track their own bytes")
+    func concurrentFilesTrackSeparately() async throws {
+        // The reason `itemProgress` exists: a transfer-wide total cannot be attributed to one file
+        // when four are in flight.
+        let model = try await makeModel()
+        let (stream, continuation) = AsyncStream<TransferEvent>.makeStream()
+        let first = makeItem("first.bin", size: 1_000)
+        let second = makeItem("second.bin", size: 400)
+
+        model.consume(stream, id: UUID(), title: "two", isDownload: true)
+        continuation.yield(.itemStarted(first))
+        continuation.yield(.itemStarted(second))
+        continuation.yield(.itemProgress(first, bytes: 250))
+        continuation.yield(.itemProgress(second, bytes: 400))
+
+        // The second count is inside the throttle's interval, so it is remembered rather than written.
+        // Waiting past the interval and sending one more event flushes everything pending — which is
+        // the coalescing working, not a delay to paper over.
+        try await Task.sleep(for: .milliseconds(120))
+        continuation.yield(.itemProgress(second, bytes: 400))
+        try await waitUntil { model.rows.allSatisfy { $0.transferredBytes > 0 } }
+
+        let firstRow = try #require(model.rows.first { $0.title == "first.bin" })
+        let secondRow = try #require(model.rows.first { $0.title == "second.bin" })
+        #expect(firstRow.fractionCompleted == 0.25)
+        #expect(secondRow.fractionCompleted == 1.0)
+        continuation.finish()
+    }
+
+    @Test("A file with no known size shows no fraction until it is done")
     func fractionIsSafe() async throws {
         let model = try await makeModel()
         let id = UUID()
+        let item = TransferItem(remote: RemotePath("/srv/unsized"),
+                                local: URL(fileURLWithPath: "/tmp/unsized"),
+                                isDirectory: false, size: nil)
 
-        model.consume(stream([
-            .planned(items: 1, bytes: nil),          // a server that reported no sizes
-            .progress(bytes: 50, of: nil),
-            .finished(TransferReport(transferred: 1, bytes: 50))
-        ]), id: id, title: "unsized", isDownload: true)
+        let (stream, continuation) = AsyncStream<TransferEvent>.makeStream()
+        model.consume(stream, id: id, title: "unsized", isDownload: true)
+        continuation.yield(.itemStarted(item))
+        continuation.yield(.itemProgress(item, bytes: 50))
+        try await waitUntil { model.rows.first?.transferredBytes == 50 }
 
-        try await waitForFinish(model, id: id)
-        let row = try #require(model.rows.first)
         // A bar with no total would be a guess; the UI shows an indeterminate one instead.
-        #expect(row.fractionCompleted == nil)
-        #expect(row.transferredBytes == 50)
+        #expect(model.rows.first?.fractionCompleted == nil)
+
+        continuation.yield(.itemFinished(item, .transferred(bytes: 50)))
+        continuation.yield(.finished(TransferReport(transferred: 1, bytes: 50)))
+        continuation.finish()
+        try await waitForFinish(model, id: id)
+
+        #expect(model.rows.first?.fractionCompleted == 1, "done is done, size known or not")
     }
 
     @Test("The final byte count survives the throttle")
     func finalCountIsNotDropped() async throws {
-        // Every progress event but the first would be throttled away here; the terminal event has to
+        // Every progress event but the first would be throttled away here; the item's finish has to
         // carry the total through anyway.
         let model = try await makeModel()
         let id = UUID()
+        let item = makeItem("big", size: 1_000)
 
-        var events: [TransferEvent] = [.planned(items: 1, bytes: 1000)]
+        var events: [TransferEvent] = [.itemStarted(item)]
         for byte in stride(from: 100, through: 1000, by: 100) {
-            events.append(.progress(bytes: Int64(byte), of: 1000))
+            events.append(.itemProgress(item, bytes: Int64(byte)))
         }
-        events.append(.finished(TransferReport(transferred: 1, bytes: 1000)))
+        events += [.itemFinished(item, .transferred(bytes: 1_000)),
+                   .finished(TransferReport(transferred: 1, bytes: 1_000))]
 
         model.consume(stream(events), id: id, title: "big", isDownload: true)
         try await waitForFinish(model, id: id)
 
-        #expect(model.rows.first?.transferredBytes == 1000)
+        #expect(model.rows.first?.transferredBytes == 1_000)
         #expect(model.rows.first?.fractionCompleted == 1)
     }
 
-    @Test("A failed run is still reported, not hidden")
+    @Test("A failed file says why, on its own row")
     func failuresAreShown() async throws {
         let model = try await makeModel()
         let id = UUID()
         let item = makeItem("gone.txt")
 
         model.consume(stream([
-            .planned(items: 1, bytes: nil),
+            .itemStarted(item),
             .itemFinished(item, .failed(.notFound(item.remote))),
             .finished(TransferReport(failed: 1))
         ]), id: id, title: "gone.txt", isDownload: true)
 
         try await waitForFinish(model, id: id)
         let row = try #require(model.rows.first)
-        #expect(row.report?.failed == 1)
-        #expect(row.report?.isSuccess == false)
+        guard case .failed(let message) = row.state else {
+            Issue.record("expected a failure state, got \(row.state)")
+            return
+        }
+        #expect(!message.isEmpty, "a failed row has to say something")
+        #expect(model.report(of: id)?.isSuccess == false)
+    }
+
+    @Test("A transfer that never starts a file still shows, carrying the failure")
+    func wholeTransferFailureIsVisible() async throws {
+        // A refused connection produces no items at all. Without the placeholder the panel would be
+        // empty and the user would think nothing happened.
+        let model = try await makeModel()
+        let id = UUID()
+
+        model.consume(stream([
+            .planned(items: 0, bytes: 0),
+            .finished(TransferReport(failure: .unreachable(host: "example.com", reason: "refused")))
+        ]), id: id, title: "batch", isDownload: true)
+        try await waitForFinish(model, id: id)
+
+        let row = try #require(model.rows.first)
+        #expect(row.title == "batch")
+        if case .failed = row.state {} else {
+            Issue.record("expected the placeholder to carry the failure, got \(row.state)")
+        }
     }
 
     @Test("Rows are newest first")
@@ -206,13 +292,16 @@ struct TransferListModelTests {
         #expect(model.rows.map(\.title) == ["second", "first"])
     }
 
-    @Test("Nothing running means no status bar")
-    func summaryIsNilWhenIdle() async throws {
+    @Test("Nothing running means nothing on the badge")
+    func summaryIsEmptyWhenIdle() async throws {
         let model = try await makeModel()
-        #expect(model.activeSummary == nil)
+        #expect(model.activeCount == 0)
+        #expect(model.interruptedCount == 0)
+        #expect(model.overallFraction == nil)
+        #expect(!model.hasActiveTransfers)
     }
 
-    @Test("A finished transfer stops appearing in the status bar")
+    @Test("A finished transfer stops counting towards the badge")
     func summaryIgnoresFinished() async throws {
         let model = try await makeModel()
         let id = UUID()
@@ -220,59 +309,36 @@ struct TransferListModelTests {
                       title: "done", isDownload: true)
         try await waitForFinish(model, id: id)
 
-        #expect(model.activeSummary == nil, "the bar should disappear once nothing is running")
+        #expect(model.activeCount == 0)
+        #expect(!model.hasActiveTransfers)
     }
 
-    @Test("The status bar names the file in flight and its overall progress")
-    func summaryReportsProgress() async throws {
-        let model = try await makeModel()
-        let (stream, continuation) = AsyncStream<TransferEvent>.makeStream()
-        model.consume(stream, id: UUID(), title: "batch", isDownload: true)
-
-        continuation.yield(.planned(items: 1, bytes: 1000))
-        continuation.yield(.itemStarted(makeItem("moving.txt")))
-        continuation.yield(.progress(bytes: 250, of: 1000))
-        try await waitUntil { model.rows.first?.transferredBytes == 250 }
-
-        let summary = try #require(model.activeSummary)
-        #expect(summary.title == "moving.txt", "the file, not the transfer, is what says where it is")
-        #expect(summary.fraction == 0.25)
-        #expect(summary.activeCount == 1)
-        continuation.finish()
-    }
-
-    @Test("Several transfers aggregate, and an unknown total makes the bar indeterminate")
+    @Test("Progress across everything moving is one fraction")
     func summaryAggregates() async throws {
         let model = try await makeModel()
-        let (first, firstFeed) = AsyncStream<TransferEvent>.makeStream()
-        let (second, secondFeed) = AsyncStream<TransferEvent>.makeStream()
+        let (stream, continuation) = AsyncStream<TransferEvent>.makeStream()
+        let first = makeItem("first.bin", size: 100)
+        let second = makeItem("second.bin", size: 100)
 
-        model.consume(first, id: UUID(), title: "one", isDownload: true)
-        model.consume(second, id: UUID(), title: "two", isDownload: false)
+        model.consume(stream, id: UUID(), title: "two", isDownload: true)
+        continuation.yield(.itemStarted(first))
+        continuation.yield(.itemStarted(second))
+        continuation.yield(.itemProgress(first, bytes: 50))
+        try await waitUntil { model.rows.contains { $0.transferredBytes == 50 } }
 
-        firstFeed.yield(.planned(items: 1, bytes: 100))
-        firstFeed.yield(.progress(bytes: 50, of: 100))
-        secondFeed.yield(.planned(items: 1, bytes: 100))
-        try await waitUntil {
-            model.rows.allSatisfy { $0.totalBytes == 100 } && model.rows.contains { $0.transferredBytes == 50 }
-        }
+        #expect(model.activeCount == 2)
+        #expect(model.overallFraction == 0.25, "50 bytes of the 200 both files add up to")
 
-        var summary = try #require(model.activeSummary)
-        #expect(summary.activeCount == 2)
-        #expect(summary.fraction == 0.25, "50 bytes of the 200 both transfers add up to")
-
-        // A transfer whose total is unknown makes the aggregate meaningless — counting it as zero would
+        // A file whose size is unknown makes the aggregate meaningless — counting it as zero would
         // make the bar jump backwards the moment its size became known.
-        let (third, thirdFeed) = AsyncStream<TransferEvent>.makeStream()
-        model.consume(third, id: UUID(), title: "three", isDownload: true)
-        thirdFeed.yield(.planned(items: 1, bytes: nil))
-        try await waitUntil { model.rows.count == 3 && model.rows.allSatisfy { $0.plannedItems == 1 } }
+        let unsized = TransferItem(remote: RemotePath("/srv/third"),
+                                   local: URL(fileURLWithPath: "/tmp/third"),
+                                   isDirectory: false, size: nil)
+        continuation.yield(.itemStarted(unsized))
+        try await waitUntil { model.activeCount == 3 }
+        #expect(model.overallFraction == nil)
 
-        summary = try #require(model.activeSummary)
-        #expect(summary.activeCount == 3)
-        #expect(summary.fraction == nil)
-
-        firstFeed.finish(); secondFeed.finish(); thirdFeed.finish()
+        continuation.finish()
     }
 
     // MARK: - Restoring
@@ -304,7 +370,7 @@ struct TransferListModelTests {
         await model.restore()
 
         let row = try #require(model.rows.first)
-        #expect(row.id == transfer.id)
+        #expect(row.transferID == transfer.id)
         #expect(row.title == "a.txt")
         #expect(row.isInterrupted)
         #expect(!row.isFinished)
@@ -325,17 +391,16 @@ struct TransferListModelTests {
         #expect(model.rows.count == 1)
     }
 
-    @Test("An interrupted transfer is reported as waiting, not as moving bytes")
+    @Test("An interrupted transfer counts as waiting, not as moving bytes")
     func summaryDistinguishesInterrupted() async throws {
         let (model, services) = try await makeModelWithJournal()
         try await services.journal.record(makeTransfer(), title: "a.txt")
         await model.restore()
 
-        let summary = try #require(model.activeSummary)
-        #expect(summary.activeCount == 0)
-        #expect(summary.interruptedCount == 1)
-        #expect(summary.fraction == nil, "a bar would claim movement that is not happening")
-        #expect(summary.title == "a.txt")
+        #expect(model.activeCount == 0)
+        #expect(model.interruptedCount == 1)
+        #expect(model.overallFraction == nil, "a bar would claim movement that is not happening")
+        #expect(model.rows.first?.title == "a.txt")
     }
 
     @Test("Resuming runs it again and the row stops being interrupted")
@@ -348,7 +413,7 @@ struct TransferListModelTests {
         await model.resume(transfer.id)
         try await waitForFinish(model, id: transfer.id)
 
-        let row = try #require(model.rows.first { $0.id == transfer.id })
+        let row = try #require(model.rows.first { $0.transferID == transfer.id })
         #expect(!row.isInterrupted)
         #expect(row.isFinished, "it ran, whatever the outcome — the file is not on this fake server")
         #expect(try await services.journal.unfinished().isEmpty, "and it is no longer pending")

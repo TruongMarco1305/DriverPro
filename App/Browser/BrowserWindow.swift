@@ -60,8 +60,6 @@ private struct BrowserDetail: View {
     @Bindable var browser: BrowserModel
     let transfers: TransferListModel?
 
-    @Environment(\.openWindow) private var openWindow
-
     @State private var isCreatingFolder = false
     @State private var newFolderName = ""
     @State private var renameTarget: RemoteItem?
@@ -76,9 +74,7 @@ private struct BrowserDetail: View {
     }
 
     private var commands: FileCommands {
-        FileCommands(browser: browser, transfers: transfers, policy: policy) {
-            openWindow(id: "transfers")
-        }
+        FileCommands(browser: browser, transfers: transfers, policy: policy)
     }
 
     var body: some View {
@@ -95,7 +91,9 @@ private struct BrowserDetail: View {
             } else {
                 PathBar(browser: browser)
                 Divider()
-                FileTable(browser: browser) {
+                FileTable(browser: browser) { urls, item in
+                    commands.upload(dropped: urls, onto: item)
+                } contextMenu: {
                     FileCommandButtons(
                         commands: commands,
                         isCreatingFolder: $isCreatingFolder,
@@ -103,12 +101,6 @@ private struct BrowserDetail: View {
                         deleteTargets: $deleteTargets
                     )
                 }
-            }
-
-            // Outside the branch: a transfer can still be finishing after a disconnect.
-            if let transfers, let summary = transfers.activeSummary {
-                Divider()
-                TransferStatusBar(summary: summary) { openWindow(id: "transfers") }
             }
         }
         .toolbar {
@@ -166,6 +158,10 @@ private struct BrowserDetail: View {
                 }
                 .help("Close this connection")
                 .disabled(browser.host == nil)
+
+                if let transfers {
+                    TransfersButton(transfers: transfers)
+                }
             }
         }
         .overlay(alignment: .top) {
