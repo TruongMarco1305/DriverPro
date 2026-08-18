@@ -197,6 +197,44 @@ struct FileOperationTests {
         #expect(destination == RemotePath("/srv/tree"), "uploads go to the directory being shown")
     }
 
+    @Test("A drop onto a folder row uploads into that folder, not the one being shown")
+    func uploadsOntoAFolderRow() async throws {
+        // The two meanings of a drop: onto the listing, and onto a folder in it.
+        let (model, _) = try await makeBrowser()
+        let folder = try #require(model.visibleItems.first { $0.isDirectory })
+        let local = URL(fileURLWithPath: "/tmp/x")
+
+        let transfer = try #require(model.makeUpload(of: [local], onto: folder))
+        guard case .upload(_, let destination) = transfer.work else {
+            Issue.record("not an upload")
+            return
+        }
+        #expect(destination == folder.path)
+        #expect(destination != model.path, "otherwise the folder row is decoration")
+    }
+
+    @Test("A drop onto a file row is refused rather than redirected")
+    func refusesADropOntoAFile() async throws {
+        // Uploading into the file's parent instead would put files somewhere nobody aimed at.
+        let (model, _) = try await makeBrowser()
+        let file = try #require(model.visibleItems.first { !$0.isDirectory })
+
+        #expect(model.makeUpload(of: [URL(fileURLWithPath: "/tmp/x")], onto: file) == nil)
+    }
+
+    @Test("An explicit destination overrides the directory being shown")
+    func explicitDestinationWins() async throws {
+        let (model, _) = try await makeBrowser()
+        let transfer = try #require(
+            model.makeUpload(of: [URL(fileURLWithPath: "/tmp/x")], into: RemotePath("/elsewhere"))
+        )
+        guard case .upload(_, let destination) = transfer.work else {
+            Issue.record("not an upload")
+            return
+        }
+        #expect(destination == RemotePath("/elsewhere"))
+    }
+
     @Test("The default policy is resume, not overwrite")
     func defaultPolicyIsResume() async throws {
         // Overwrite was the silent default until now: downloading a file you already had destroyed the

@@ -94,19 +94,46 @@ extension BrowserModel {
         )
     }
 
-    /// Builds an upload of local files into the directory being shown.
+    /// Builds an upload of local files into a remote directory.
+    ///
+    /// The destination is a parameter because a drop has two meanings: onto the listing sends files to
+    /// the directory being shown, onto a folder row sends them into *that* folder.
     ///
     /// - Parameters:
     ///   - urls: What to send. Folders are taken whole.
+    ///   - destination: Where to put them. Defaults to the directory being shown.
     ///   - policy: What to do about files that already exist.
     /// - Returns: The job, or `nil` if there is nothing to do.
-    public func makeUpload(of urls: [URL], policy: OverwritePolicy = .resume) -> Transfer? {
+    public func makeUpload(
+        of urls: [URL],
+        into destination: RemotePath? = nil,
+        policy: OverwritePolicy = .resume
+    ) -> Transfer? {
         guard let host, !urls.isEmpty else { return nil }
         return Transfer(
             host: host,
-            work: .upload(sources: urls, destination: path),
+            work: .upload(sources: urls, destination: destination ?? path),
             overwritePolicy: policy
         )
+    }
+
+    /// Builds an upload into a directory the user dropped onto.
+    ///
+    /// Refuses anything that is not a directory: dropping a file onto a *file* row is a mis-aim, and
+    /// uploading into its parent instead would put files somewhere nobody asked for.
+    ///
+    /// - Parameters:
+    ///   - urls: What to send.
+    ///   - item: The row that was dropped on.
+    ///   - policy: What to do about files that already exist.
+    /// - Returns: The job, or `nil` if the row is not a directory.
+    public func makeUpload(
+        of urls: [URL],
+        onto item: RemoteItem,
+        policy: OverwritePolicy = .resume
+    ) -> Transfer? {
+        guard item.isDirectory else { return nil }
+        return makeUpload(of: urls, into: item.path, policy: policy)
     }
 
     /// The entries currently selected, in the order shown.
