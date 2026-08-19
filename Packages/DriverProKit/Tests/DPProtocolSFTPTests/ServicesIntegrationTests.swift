@@ -104,8 +104,14 @@ struct ServicesIntegrationTests {
 
     @Test("A stale stored password falls back to asking, and the new one replaces it")
     func stalePasswordTriggersRetry() async throws {
-        // Only reachable against a real server: the in-memory session accepts any credentials, so it
-        // can never reject a saved password.
+        // Only reachable against a real server: the in-memory session accepts any credentials, so it can
+        // never reject a saved password.
+        //
+        // This used to assert that `connect` *threw*. Citadel builds its client eagerly, so a refused
+        // credential could not be replaced mid-handshake and the failure had to surface to the user, who
+        // then reconnected. `SFTPSession.connect` now makes one more attempt with whatever the delegate
+        // supplies when asked, so the stale password is a prompt rather than an error — which is what this
+        // test's name always claimed. See ADR 013.
         let host = makeHost()
         let store = InMemoryCredentialStore(passwords: [host.id: "definitely-not-the-password"])
         let knownHosts = makeThrowawayKnownHosts()
@@ -113,11 +119,12 @@ struct ServicesIntegrationTests {
         let prompt = Prompt(password: IntegrationConfig.password)
         let services = try makeServices(prompt: prompt, credentials: store, knownHosts: knownHosts)
 
-        // Citadel exhausts its methods and reports a refusal rather than re-requesting mid-handshake,
-        // so the stale password surfaces as an authentication failure the app retries at a higher level.
-        await #expect(throws: SessionError.self) {
-            try await services.connect(to: host)
-        }
+        try await services.connect(to: host)
+
+        #expect(await prompt.credentialPromptCount == 1, "asked once, on the retry — and only once")
+        // The second half of the name, which the old assertion never actually checked.
+        #expect(try await store.password(for: host) == IntegrationConfig.password,
+                "the password that worked should have replaced the one that did not")
         await services.disconnectAll()
     }
 

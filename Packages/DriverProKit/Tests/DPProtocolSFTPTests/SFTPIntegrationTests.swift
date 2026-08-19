@@ -27,6 +27,34 @@ enum IntegrationConfig {
 
     /// Whether a server was configured.
     static var isEnabled: Bool { host != nil }
+
+    // MARK: - Keys
+
+    /// A key path from the environment.
+    ///
+    /// Absolute, because `script.sh` resolves the repo-relative values in `.env` before exporting them —
+    /// `swift test --package-path` runs with the package as its working directory, not the repo root, so a
+    /// relative path would silently resolve to the wrong place and the suite would quietly skip.
+    private static func keyPath(_ variable: String) -> String? {
+        ProcessInfo.processInfo.environment[variable]
+    }
+
+    /// An unencrypted Ed25519 key the server authorises.
+    static var keyPath: String? { keyPath("SFTP_KEY_PATH") }
+    /// The same key material, protected by ``keyPassphrase``.
+    static var encryptedKeyPath: String? { keyPath("SFTP_ENCRYPTED_KEY_PATH") }
+    /// An RSA key the server authorises but that this transport cannot sign for. See ADR 014.
+    static var rsaKeyPath: String? { keyPath("SFTP_RSA_KEY_PATH") }
+    /// The passphrase for ``encryptedKeyPath``.
+    static var keyPassphrase: String {
+        ProcessInfo.processInfo.environment["SFTP_KEY_PASSPHRASE"] ?? "fixture-passphrase"
+    }
+
+    /// Whether the generated keys are actually on disk, as well as configured.
+    static var hasKeys: Bool {
+        guard isEnabled, let keyPath else { return false }
+        return FileManager.default.fileExists(atPath: keyPath)
+    }
 }
 
 /// Tests against a real SFTP server.

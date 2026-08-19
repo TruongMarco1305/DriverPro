@@ -231,13 +231,13 @@ struct SFTPAuthenticationTests {
         let garbage = Data("not a key".utf8)
 
         let withoutPassphrase = Credentials(
-            username: "duck", method: .privateKey(data: garbage, passphrase: nil))
+            username: "duck", method: .privateKey(data: garbage, passphrase: nil, path: nil))
         #expect(throws: SessionError.self) {
             _ = try SFTPSession.authenticationMethod(for: withoutPassphrase)
         }
 
         let withPassphrase = Credentials(
-            username: "duck", method: .privateKey(data: garbage, passphrase: "secret"))
+            username: "duck", method: .privateKey(data: garbage, passphrase: "secret", path: nil))
         #expect(throws: SessionError.self) {
             _ = try SFTPSession.authenticationMethod(for: withPassphrase)
         }
