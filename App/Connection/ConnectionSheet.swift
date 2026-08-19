@@ -34,6 +34,9 @@ struct ConnectionSheet: View {
     /// `nil` while the chooser is up. Setting it is what advances to the form.
     @State private var chosen: ProtocolIdentifier?
 
+    /// Whether the key file panel is up.
+    @State private var isChoosingKey = false
+
     /// Creates the sheet, already filled in when editing.
     /// - Parameter mode: Whether this describes a new connection or changes a saved one.
     init(mode: ConnectionSheetMode) {
@@ -65,6 +68,9 @@ struct ConnectionSheet: View {
             }
         }
         .frame(width: 460)
+        // Not in `init`: this touches the file system and asks the agent, and a `View` initialiser runs
+        // many times as SwiftUI rebuilds. Both answers can also change while the sheet is open.
+        .task { form.discoverKeys() }
     }
 
     // MARK: - Step two
@@ -79,11 +85,7 @@ struct ConnectionSheet: View {
                     if form.shows(.username) {
                         TextField("User Name", text: $form.username)
                     }
-                    if form.shows(.password) {
-                        SecureField("Password", text: $form.password,
-                                    prompt: form.isEditing ? Text("Leave blank to keep the saved one")
-                                                           : nil)
-                    }
+                    authentication
                     if form.shows(.defaultPath) {
                         TextField("Path", text: $form.defaultPath, prompt: Text("Optional"))
                     }
@@ -114,6 +116,133 @@ struct ConnectionSheet: View {
                     .disabled(!form.isValid)
             }
             .padding(12)
+        }
+    }
+
+    // MARK: - Authentication
+
+    /// The login method, and whatever that choice needs.
+    ///
+    /// Which methods appear comes from `ProtocolDescriptor.authentications`, so this is not a `switch` on
+    /// the protocol — but it is a `switch` on the *method*, because each one genuinely needs a different
+    /// control. The picker itself is hidden when a protocol offers only one way in, since a picker with a
+    /// single choice is just a label.
+    @ViewBuilder
+    private var authentication: some View {
+        if form.offeredAuthentications.count > 1 {
+            Picker("Authenticate", selection: $form.authentication) {
+                ForEach(form.offeredAuthentications, id: \.self) { kind in
+                    Text(kind.displayName).tag(kind)
+                }
+            }
+        }
+
+        switch form.authentication {
+        case .password:
+            if form.shows(.password) {
+                SecureField("Password", text: $form.password,
+                            prompt: form.isEditing ? Text("Leave blank to keep the saved one") : nil)
+            }
+        case .privateKey:
+            keyPicker
+        case .agent:
+            agentStatus
+        }
+    }
+
+    /// One row: which key is chosen, and a button to change it.
+    ///
+    /// The note underneath is the point of the whole control. An `id_rsa` cannot work with this SSH
+    /// transport, and an `id_ed25519.pub` is the wrong half of the pair — finding either out from a failed
+    /// login, which says nothing about the file, is a bad afternoon. See ADR 014.
+    @ViewBuilder
+    private var keyPicker: some View {
+        LabeledContent("Private Key") {
+            HStack {
+                Text(form.privateKeyName ?? "None selected")
+                    .foregroundStyle(form.privateKeyName == nil ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button("Choose…") { isChoosingKey = true }
+            }
+        }
+        .fileImporter(isPresented: $isChoosingKey, allowedContentTypes: [.data]) { result in
+            // No security-scoped bookmark: the app is deliberately not sandboxed, so the raw path is
+            // enough and goes straight onto the bookmark. See ADR 004.
+            if case .success(let url) = result { form.choosePrivateKey(at: url) }
+        }
+        // `~/.ssh` is a dot directory, so without `.includeHiddenFiles` the panel opens into a folder that
+        // appears empty. Opening there at all is what replaces the list of discovered keys this row used
+        // to show: the common choice is one click away rather than a hunt.
+        .fileDialogDefaultDirectory(URL.homeDirectory.appending(path: ".ssh"))
+        .fileDialogBrowserOptions(.includeHiddenFiles)
+
+        keyStatus
+    }
+
+    /// What is wrong with the chosen key, or what to expect from it.
+    @ViewBuilder
+    private var keyStatus: some View {
+        switch form.privateKeyStatus {
+        case .none:
+            EmptyView()
+
+        case .rejected(let reason):
+            // Connect is disabled while this shows — see `ConnectionFormModel.isValid`.
+            Label(reason, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.red)
+
+        case .usable(let key):
+            switch key.supportLevel {
+            case .supported:
+                if key.isEncrypted {
+                    Label("This key has a passphrase. DriverPro will ask for it once, and can remember it.",
+                          systemImage: "lock")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            case .unsupported(let reason):
+                // Orange, not red, and Connect stays enabled: the key is real and may satisfy an older
+                // server. ADR 014 chose to attempt rather than refuse.
+                Label(reason, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            case .caveat(let note):
+                Label(note, systemImage: "info.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Whether an agent is running and what it holds.
+    ///
+    /// "No agent" and "an agent holding nothing" are shown differently because only the second is fixed by
+    /// `ssh-add`. Neither disables the Connect button: whether a given key will satisfy this server is only
+    /// knowable by trying, and refusing to try would be a guess.
+    @ViewBuilder
+    private var agentStatus: some View {
+        switch form.agentIdentities {
+        case .none:
+            Label("No ssh-agent is running. Start one and add a key with `ssh-add`.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.orange)
+        case .some(let identities) where identities.isEmpty:
+            Label("The ssh-agent is running but holds no keys. Add one with `ssh-add`.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.orange)
+        case .some(let identities):
+            VStack(alignment: .leading, spacing: 2) {
+                Text("^[\(identities.count) key](inflect: true) available:")
+                    .foregroundStyle(.secondary)
+                ForEach(identities, id: \.keyBlob) { identity in
+                    Text(identity.displayName).foregroundStyle(.secondary)
+                }
+            }
+            .font(.callout)
         }
     }
 

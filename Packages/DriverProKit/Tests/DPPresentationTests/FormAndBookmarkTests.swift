@@ -5,6 +5,7 @@
 
 import DPBookmarks
 import DPCore
+import DPCredentials
 import DPDatabase
 import DPServices
 import Foundation
@@ -183,6 +184,40 @@ struct ConnectionFormModelTests {
         #expect(saved.first?.nickname == "Work (EU)")
     }
 
+    @Test("Editing a bookmark keeps protocol settings the form does not know about")
+    func editingPreservesUnknownProperties() throws {
+        // The form has no field for these and never will. Rebuilding the bookmark from its fields
+        // alone would delete them, so an S3 bookmark would lose its region every time somebody
+        // renamed it.
+        let original = RemoteHost(
+            protocolIdentifier: .sftp, hostname: "example.com", port: 22, username: "duck",
+            properties: ["s3.region": "eu-west-1", "sftp.privateKeyPath": "/Users/duck/.ssh/id_ed25519"]
+        )
+        let form = ConnectionFormModel()
+        form.load(from: original)
+        form.nickname = "Work (EU)"
+
+        let edited = try #require(form.makeHost())
+
+        // Every key the form does not understand survives untouched. It may *add* to the bag — the login
+        // method lives there too — but it must never drop anything.
+        for (key, value) in original.properties {
+            #expect(edited.properties[key] == value, "\(key) was lost")
+        }
+    }
+
+    @Test("A bookmark the form created carries no settings it was never given")
+    func creatingStartsWithNoBorrowedProperties() throws {
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.password = "hunter2"
+
+        // Only what this form actually chose. A fresh bookmark inheriting another's region or key path
+        // would be a data-leak between connections.
+        let properties = try #require(form.makeHost()).properties
+        #expect(properties == [RemoteHost.authenticationMethodKey: AuthenticationKind.password.rawValue])
+    }
+
     @Test("A blank password is fine when editing, because the saved one is being kept")
     func editingDoesNotRequireThePassword() {
         // The Keychain never reads a password back into a text field, so demanding one here would mean
@@ -208,6 +243,305 @@ struct ConnectionFormModelTests {
 
         #expect(!form.isEditing)
         #expect(try #require(form.makeHost()).id != #require(form.makeHost()).id)
+    }
+
+    // MARK: - Authentication
+
+    @Test("A new form starts on a password, and offers what the protocol accepts")
+    func authenticationDefaults() {
+        let form = ConnectionFormModel()
+        #expect(form.authentication == .password)
+        #expect(form.offeredAuthentications == [.password, .privateKey, .agent])
+    }
+
+    @Test("A key login needs a key, not a password")
+    func keyLoginRequiresAKey() {
+        // The asymmetry with a password is deliberate: a blank password can fall back to the Keychain, but
+        // a bookmark saying "use a key" without naming one would quietly become a password login.
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.authentication = .privateKey
+
+        #expect(!form.isValid, "no key chosen")
+        form.privateKeyPath = "/Users/duck/.ssh/id_ed25519"
+        #expect(form.isValid, "and no password needed")
+        #expect(form.makeCredentials() == nil, "key material is not a form's business")
+    }
+
+    @Test("An agent login needs nothing typed at all")
+    func agentLoginNeedsNothing() {
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.authentication = .agent
+
+        #expect(form.isValid)
+        #expect(form.makeCredentials() == nil)
+    }
+
+    @Test("A typed password is ignored once another method is chosen")
+    func passwordIsNotOfferedForOtherMethods() {
+        // Otherwise switching to a key after typing a password would preload it and connect with the
+        // password instead, which looks like the picker did nothing.
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.password = "hunter2"
+        #expect(form.makeCredentials() != nil)
+
+        form.authentication = .agent
+        #expect(form.makeCredentials() == nil)
+    }
+
+    @Test("The login choice round-trips through a bookmark", arguments: [
+        AuthenticationKind.password, .privateKey, .agent
+    ])
+    func authenticationRoundTrips(kind: AuthenticationKind) throws {
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.password = "hunter2"
+        form.authentication = kind
+        form.privateKeyPath = "/Users/duck/.ssh/id_ed25519"
+
+        let host = try #require(form.makeHost())
+
+        let reloaded = ConnectionFormModel()
+        reloaded.load(from: host)
+        #expect(reloaded.authentication == kind)
+        if kind == .privateKey {
+            #expect(reloaded.privateKeyPath == "/Users/duck/.ssh/id_ed25519")
+        }
+    }
+
+    @Test("A key path survives an edit that switches to a password and back")
+    func keyPathSurvivesSwitchingAway() throws {
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.authentication = .privateKey
+        form.privateKeyPath = "/Users/duck/.ssh/id_ed25519"
+        let host = try #require(form.makeHost())
+
+        let editing = ConnectionFormModel()
+        editing.load(from: host)
+        editing.authentication = .password
+        editing.password = "hunter2"
+        let saved = try #require(editing.makeHost())
+
+        // Still on the bookmark, so switching back does not mean finding the file again.
+        let again = ConnectionFormModel()
+        again.load(from: saved)
+        again.authentication = .privateKey
+        #expect(again.privateKeyPath == "/Users/duck/.ssh/id_ed25519")
+    }
+
+    @Test("Discovering keys finds what is in the directory and reports no agent when there is none")
+    func discoversKeysAndNoAgent() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "dp-ssh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try openSSHKeyText().write(to: directory.appending(path: "id_ed25519"),
+                                   atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.discoverKeys(locator: PrivateKeyLocator(sshDirectory: directory), agent: nil)
+
+        #expect(form.discoveredKeys.map(\.name) == ["id_ed25519"])
+        #expect(form.agentIdentities == nil, "no agent and an empty agent must be distinguishable")
+    }
+
+    @Test("Choosing a key file selects it and switches the method")
+    func choosingAKeyFileSelectsIt() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "work-server.key")
+        try openSSHKeyText().write(to: url, atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.choosePrivateKey(at: url)
+
+        #expect(form.authentication == .privateKey)
+        #expect(form.privateKeyPath == url.path)
+        #expect(form.privateKeyName == "work-server.key", "the row shows the file, not the whole path")
+        #expect(form.privateKeyStatus == .usable(try PrivateKeyLocator().inspectKey(at: url)))
+    }
+
+    // MARK: - Checking the chosen key
+
+    @Test("Choosing the .pub file is refused, and the form will not submit")
+    func choosingAPublicKeyIsRefused() throws {
+        // The mistake this validation exists for: `id_ed25519` and `id_ed25519.pub` sit side by side. It
+        // used to be accepted silently and surface much later as a login failure that never mentioned the
+        // file.
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "id_ed25519.pub")
+        try "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 duck@example.com"
+            .write(to: url, atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.choosePrivateKey(at: url)
+
+        guard case .rejected(let reason) = form.privateKeyStatus else {
+            Issue.record("expected a rejection, got \(form.privateKeyStatus)")
+            return
+        }
+        #expect(reason.contains("private half"), "and it should say what to pick instead")
+        #expect(!form.isValid, "Connect must be disabled while the wrong file is chosen")
+    }
+
+    @Test("Choosing a file that is not a key at all is refused")
+    func choosingSomethingElseIsRefused() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "notes.txt")
+        try "shopping list".write(to: url, atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.choosePrivateKey(at: url)
+
+        guard case .rejected = form.privateKeyStatus else {
+            Issue.record("expected a rejection, got \(form.privateKeyStatus)")
+            return
+        }
+        #expect(!form.isValid)
+    }
+
+    @Test("Choosing a good key clears an earlier rejection")
+    func choosingAGoodKeyRecovers() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bad = directory.appending(path: "notes.txt")
+        try "shopping list".write(to: bad, atomically: true, encoding: .utf8)
+        let good = directory.appending(path: "id_ed25519")
+        try openSSHKeyText().write(to: good, atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.choosePrivateKey(at: bad)
+        #expect(!form.isValid)
+
+        form.choosePrivateKey(at: good)
+        #expect(form.isValid, "the error must not outlive the file that caused it")
+    }
+
+    @Test("An algorithm this transport cannot sign for is a warning, not a refusal")
+    func anUnsupportedAlgorithmStillSubmits() throws {
+        // ADR 014: an RSA key is offered anyway, because it does work against an older server. Pinned here
+        // so a later tidy-up of the validation does not quietly reverse that decision.
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "id_rsa")
+        try openSSHKeyText(algorithm: "ssh-rsa").write(to: url, atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.hostname = "example.com"
+        form.choosePrivateKey(at: url)
+
+        guard case .usable(let key) = form.privateKeyStatus else {
+            Issue.record("an RSA key is usable, just discouraged — got \(form.privateKeyStatus)")
+            return
+        }
+        guard case .unsupported = key.supportLevel else {
+            Issue.record("expected the RSA warning, got \(key.supportLevel)")
+            return
+        }
+        #expect(form.isValid, "warned, not blocked")
+    }
+
+    @Test("A bookmark whose key file has gone says so when the sheet opens")
+    func aMissingKeyIsCaughtOnDiscovery() throws {
+        // Validation runs in `discoverKeys`, not `load(from:)`, because the latter runs inside the sheet's
+        // initialiser. This is what that buys: the sheet reports a deleted key instead of the connection
+        // failing later with nothing about the file.
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var host = RemoteHost(protocolIdentifier: .sftp, hostname: "example.com", port: 22, username: "duck")
+        host.authenticationPreference = .privateKey(path: directory.appending(path: "gone").path)
+
+        let form = ConnectionFormModel()
+        form.load(from: host)
+        #expect(form.isValid, "not looked at yet, so nothing to object to")
+
+        form.discoverKeys(locator: PrivateKeyLocator(sshDirectory: directory), agent: nil)
+
+        guard case .rejected = form.privateKeyStatus else {
+            Issue.record("expected a rejection, got \(form.privateKeyStatus)")
+            return
+        }
+        #expect(!form.isValid)
+    }
+
+    @Test("A new connection starts on the strongest key already in ~/.ssh")
+    func discoveryOffersADefaultKey() throws {
+        // What replaces the list the key row used to show. Only a default: it never overrides a choice.
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try openSSHKeyText().write(to: directory.appending(path: "id_ed25519"),
+                                   atomically: true, encoding: .utf8)
+        try openSSHKeyText(algorithm: "ssh-rsa").write(to: directory.appending(path: "id_rsa"),
+                                                       atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.discoverKeys(locator: PrivateKeyLocator(sshDirectory: directory), agent: nil)
+
+        #expect(form.privateKeyName == "id_ed25519", "Ed25519 before RSA, as `conventionalNames` orders them")
+    }
+
+    @Test("Discovery does not overwrite a key the bookmark already names")
+    func discoveryLeavesAChosenKeyAlone() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try openSSHKeyText().write(to: directory.appending(path: "id_ed25519"),
+                                   atomically: true, encoding: .utf8)
+        let chosen = directory.appending(path: "work-server.key")
+        try openSSHKeyText().write(to: chosen, atomically: true, encoding: .utf8)
+
+        let form = ConnectionFormModel()
+        form.choosePrivateKey(at: chosen)
+        form.discoverKeys(locator: PrivateKeyLocator(sshDirectory: directory), agent: nil)
+
+        #expect(form.privateKeyPath == chosen.path)
+    }
+
+    // MARK: - Key fixtures
+
+    /// A throwaway directory to write key files into.
+    private func makeDirectory() throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "dp-ssh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// A minimal but genuinely parseable OpenSSH key.
+    ///
+    /// Built rather than pasted, so the parts the code actually reads are visible: the magic string, the
+    /// cipher name (`none` — not encrypted), two more empty strings, a key count, and the public half,
+    /// whose leading algorithm name is what `supportLevel` keys off.
+    ///
+    /// - Parameter algorithm: The algorithm to claim, so an unsupported one can be exercised.
+    private func openSSHKeyText(algorithm: String = "ssh-ed25519") -> String {
+        func sshString(_ bytes: Data) -> Data {
+            var out = Data([UInt8(bytes.count >> 24), UInt8(bytes.count >> 16),
+                            UInt8(bytes.count >> 8), UInt8(bytes.count & 0xff)])
+            out.append(bytes)
+            return out
+        }
+
+        var body = Data("openssh-key-v1\0".utf8)
+        body += sshString(Data("none".utf8))            // ciphername: not encrypted
+        body += sshString(Data())                       // kdfname
+        body += sshString(Data())                       // kdfoptions
+        body += Data([0, 0, 0, 1])                      // one key
+        body += sshString(sshString(Data(algorithm.utf8)) + sshString(Data(repeating: 7, count: 32)))
+
+        return """
+        -----BEGIN OPENSSH PRIVATE KEY-----
+        \(body.base64EncodedString())
+        -----END OPENSSH PRIVATE KEY-----
+        """
     }
 
     // MARK: - Persistence

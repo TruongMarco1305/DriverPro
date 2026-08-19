@@ -145,13 +145,16 @@ let package = Package(
         // SwiftUI, so `swift test` covers it.
         .target(
             name: "DPPresentation",
-            dependencies: ["DPCore", "DPServices", "DPBookmarks", "DPTransfer"],
+            // DPCredentials is here for `PrivateKeyLocator` and `SSHAgentClient`: the connection sheet
+            // offers the keys in ~/.ssh and says whether an agent is running, and both are questions to
+            // answer while the form is on screen rather than at connect time.
+            dependencies: ["DPCore", "DPServices", "DPBookmarks", "DPTransfer", "DPCredentials"],
             swiftSettings: swiftSettings
         ),
         .testTarget(
             name: "DPPresentationTests",
             dependencies: ["DPPresentation", "DPCore", "DPServices", "DPTestSupport", "DPDatabase",
-                           "DPBookmarks"],
+                           "DPBookmarks", "DPCredentials"],
             swiftSettings: swiftSettings
         ),
 

@@ -7,7 +7,12 @@ import DPCore
 import DPPresentation
 import SwiftUI
 
-/// Asks for a password, and says why it is asking.
+/// Asks for a secret, and says why it is asking.
+///
+/// The reason does more than pick a sentence: it decides what the one secure field *means*. For
+/// `privateKeyPassphrase` the field is a key's passphrase rather than an account password, and the
+/// user name is irrelevant, so it goes away. `CredentialCoordinator` converts the answer back — see
+/// `CredentialRequest.Reason.privateKeyPassphrase`.
 struct CredentialSheet: View {
 
     @Environment(AppEnvironment.self) private var environment
@@ -15,8 +20,14 @@ struct CredentialSheet: View {
     let request: CredentialRequest
 
     @State private var username = ""
-    @State private var password = ""
-    @State private var savesPassword = true
+    @State private var secret = ""
+    @State private var savesSecret = true
+
+    /// Whether this sheet is unlocking a key rather than signing in to a server.
+    private var isUnlockingKey: Bool {
+        if case .privateKeyPassphrase = request.reason { return true }
+        return false
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -27,10 +38,13 @@ struct CredentialSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Form {
-                TextField("User Name", text: $username)
-                SecureField("Password", text: $password)
+                if !isUnlockingKey {
+                    TextField("User Name", text: $username)
+                }
+                SecureField(isUnlockingKey ? "Passphrase" : "Password", text: $secret)
                 if request.allowsPersistence {
-                    Toggle("Save password in Keychain", isOn: $savesPassword)
+                    Toggle(isUnlockingKey ? "Remember passphrase in Keychain"
+                                          : "Save password in Keychain", isOn: $savesSecret)
                 }
             }
             .formStyle(.grouped)
@@ -38,15 +52,15 @@ struct CredentialSheet: View {
             HStack {
                 Button("Cancel", role: .cancel) { environment.prompt.answerCredentials(nil) }
                 Spacer()
-                Button("Connect") {
+                Button(isUnlockingKey ? "Unlock" : "Connect") {
                     environment.prompt.answerCredentials(.password(
                         username: username,
-                        password: password,
-                        shouldPersist: request.allowsPersistence && savesPassword
+                        password: secret,
+                        shouldPersist: request.allowsPersistence && savesSecret
                     ))
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(username.isEmpty)
+                .disabled(isSubmitDisabled)
             }
         }
         .padding(20)
@@ -54,9 +68,19 @@ struct CredentialSheet: View {
         .onAppear { username = request.host.username ?? "" }
     }
 
+    /// A key needs its passphrase; a server needs a user name. Requiring a user name for a passphrase
+    /// would make the prompt unanswerable for a bookmark that has none.
+    private var isSubmitDisabled: Bool {
+        isUnlockingKey ? secret.isEmpty : username.isEmpty
+    }
+
     private var title: String {
-        if case .retry = request.reason { return "Login failed" }
-        return "Sign in to \(request.host.hostname)"
+        switch request.reason {
+        case .initial: "Sign in to \(request.host.hostname)"
+        case .retry: "Login failed"
+        case .privateKeyPassphrase: "Unlock private key"
+        case .privateKeyUnreadable: "That key cannot be used"
+        }
     }
 
     private var explanation: String {
@@ -68,6 +92,10 @@ struct CredentialSheet: View {
             "The server rejected the previous attempt: \(failure)"
         case .privateKeyPassphrase(let keyPath):
             "Enter the passphrase for \(keyPath)."
+        case .privateKeyUnreadable(let keyPath, let reason):
+            // Nothing reached the server. Naming the file is what lets the user go and fix it.
+            "\(reason)\n\nDriverPro could not use \(keyPath). Sign in with a password instead, or "
+                + "choose a different key by editing this connection."
         }
     }
 }
