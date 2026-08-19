@@ -269,6 +269,35 @@ struct QueueJournallingTests {
         #expect(updates.count == 3, "one per file, whatever the file's size")
     }
 
+    @Test("An unjournalled run is never recorded, so a quit during one restores nothing")
+    func unjournalledIsNeverRecorded() async throws {
+        // A Quick Look copy lands in a temp folder that quit deletes. Recording it would mean the next
+        // launch offering to resume a download into a folder that no longer exists.
+        //
+        // `completedIsForgotten` above is what pins the opposite default: without the flag, a run is
+        // recorded before any work starts.
+        let session = try await TransferFixture.makeSession()
+        await session.seed(file: RemotePath("/srv/a.bin"), contents: TransferFixture.bytes(500))
+
+        let journal = RecordingJournal()
+        let queue = TransferQueue(pool: TransferFixture.makePool(session: session), journal: journal)
+        let destination = try TransferFixture.makeTemporaryDirectory()
+        let transfer = Transfer(
+            host: TransferFixture.host,
+            work: .download(sources: [RemotePath("/srv/a.bin")], destination: destination)
+        )
+
+        let events = await queue.run(transfer, title: "a.bin", journalled: false).collect()
+
+        // Asserted first: a run that failed early would leave the journal empty too, and prove nothing.
+        #expect(events.report?.isSuccess == true)
+        #expect(FileManager.default.fileExists(atPath: destination.appending(path: "a.bin").path))
+
+        #expect(await journal.live.isEmpty)
+        let records = await journal.calls.filter { $0 == .record(transfer.id) }
+        #expect(records.isEmpty, "never written, rather than written and then cleaned up")
+    }
+
     @Test("A journalled run against the real store leaves the table empty")
     func endToEndThroughSQLite() async throws {
         let session = try await TransferFixture.makeSession()

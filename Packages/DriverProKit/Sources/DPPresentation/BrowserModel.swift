@@ -193,6 +193,16 @@ public final class BrowserModel {
         path = .root
     }
 
+    /// Shows a message in the browser's error alert.
+    ///
+    /// For work the app does on the browser's behalf that has nowhere of its own to fail: a Quick Look
+    /// copy has no row in the transfers panel, so a refused download would otherwise be silent.
+    ///
+    /// - Parameter message: What to tell the user.
+    public func report(_ message: String) {
+        errorMessage = message
+    }
+
     /// Clears the current message.
     public func dismissError() {
         errorMessage = nil

@@ -50,18 +50,29 @@ public actor TransferQueue {
     /// - Parameter transfer: What to move.
     /// - Returns: Events, in order.
     /// - Parameter title: What to call it if it has to be restored after a quit. Defaults to the id.
-    public func run(_ transfer: Transfer, title: String? = nil) -> AsyncStream<TransferEvent> {
+    /// - Parameter journalled: Whether an unfinished run should be remembered across a quit. Pass
+    ///   `false` for a temporary copy: its destination is deleted at quit, so a journalled one comes
+    ///   back at the next launch as an interrupted transfer pointing at nothing.
+    public func run(
+        _ transfer: Transfer,
+        title: String? = nil,
+        journalled: Bool = true
+    ) -> AsyncStream<TransferEvent> {
         let (stream, continuation) = AsyncStream<TransferEvent>.makeStream()
 
         let task = Task {
             // Recorded before any work starts: a transfer that dies during planning is still one the
             // user asked for, and should come back.
-            try? await journal?.record(transfer, title: title ?? transfer.id.uuidString)
+            if journalled {
+                try? await journal?.record(transfer, title: title ?? transfer.id.uuidString)
+            }
 
             let report = await execute(transfer, emit: { continuation.yield($0) })
 
             // However it ended, it has ended — and the journal holds only what has not.
-            try? await journal?.forget(transfer.id)
+            if journalled {
+                try? await journal?.forget(transfer.id)
+            }
 
             continuation.yield(.finished(report))
             continuation.finish()
@@ -268,7 +279,9 @@ public actor TransferQueue {
     ) async -> TransferReport {
         // The journal is updated per finished file, not per chunk: a write every few kilobytes would
         // cost more than the transfer, and the counters are only there so a restored row can say how
-        // far it got.
+        // far it got. An unjournalled run needs no flag here — updating a transfer that was never
+        // recorded is an `UPDATE … WHERE id = ?` matching nothing, which the journal documents as a
+        // no-op.
         var report = TransferReport()
         let total = totalBytes(of: files)
         let progress = ProgressReporter(grandTotal: total, emit: emit)
