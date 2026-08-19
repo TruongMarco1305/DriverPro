@@ -38,7 +38,16 @@ public struct Credentials: Sendable {
         /// - Parameters:
         ///   - data: The key file's raw bytes, in PEM or OpenSSH format.
         ///   - passphrase: The passphrase, if the key is encrypted.
-        case privateKey(data: Data, passphrase: String?)
+        ///   - path: Where the key was read from, or `nil` if it did not come from a file. Not a
+        ///     secret; carried so that a passphrase the server accepted can be saved against the
+        ///     right Keychain item, which is addressed by path.
+        case privateKey(data: Data, passphrase: String?, path: String?)
+
+        /// Authenticate through the running `ssh-agent`.
+        ///
+        /// Carries nothing, and that is the point: the agent holds the key and never hands it over.
+        /// Only signatures come back, so there is no secret here to carry, redact, or leak.
+        case sshAgent
 
         /// An OAuth or session bearer token.
         case token(String)
@@ -92,6 +101,38 @@ public struct Credentials: Sendable {
         Credentials(username: username, method: .anonymous)
     }
 
+    /// Creates a private key credential.
+    ///
+    /// - Parameters:
+    ///   - username: The account name.
+    ///   - data: The key file's raw bytes.
+    ///   - passphrase: The passphrase, if the key is encrypted.
+    ///   - path: Where the key was read from.
+    ///   - shouldPersist: Whether to save the passphrase to the Keychain on success.
+    public static func privateKey(
+        username: String,
+        data: Data,
+        passphrase: String? = nil,
+        path: String? = nil,
+        shouldPersist: Bool = false
+    ) -> Credentials {
+        Credentials(
+            username: username,
+            method: .privateKey(data: data, passphrase: passphrase, path: path),
+            shouldPersist: shouldPersist
+        )
+    }
+
+    /// Creates a credential that authenticates through the running `ssh-agent`.
+    ///
+    /// There is nothing to persist: the agent already holds the key, so `shouldPersist` is always
+    /// `false`.
+    ///
+    /// - Parameter username: The account name.
+    public static func sshAgent(username: String) -> Credentials {
+        Credentials(username: username, method: .sshAgent)
+    }
+
 }
 
 // MARK: - Redacted description
@@ -106,7 +147,10 @@ extension Credentials: CustomStringConvertible, CustomDebugStringConvertible {
         let methodName: String = switch method {
         case .anonymous: "anonymous"
         case .password: "password ⟨redacted⟩"
-        case .privateKey(_, let passphrase): "privateKey ⟨redacted⟩\(passphrase == nil ? "" : " +passphrase")"
+        case .privateKey(_, let passphrase, let path):
+            // The path is safe to print and is the useful half when diagnosing "which key did it try?".
+            "privateKey ⟨redacted⟩\(passphrase == nil ? "" : " +passphrase")\(path.map { " at \($0)" } ?? "")"
+        case .sshAgent: "sshAgent"
         case .token: "token ⟨redacted⟩"
         }
         return "Credentials(username: \(username), method: \(methodName))"

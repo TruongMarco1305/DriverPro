@@ -48,6 +48,88 @@ struct RemoteHostTests {
         #expect(host.keychainAccount == "duck")
         #expect(makeHost().keychainAccount == "", "anonymous connections still need a key")
     }
+
+    // MARK: - Authentication preference
+
+    @Test("A bookmark that says nothing about authentication means password")
+    func authenticationDefaultsToPassword() {
+        #expect(makeHost().authenticationPreference == .password)
+    }
+
+    @Test("The authentication preference round-trips through the property bag", arguments: [
+        AuthenticationPreference.password,
+        .privateKey(path: "/Users/duck/.ssh/id_ed25519"),
+        .agent
+    ])
+    func preferenceRoundTrips(preference: AuthenticationPreference) throws {
+        var host = makeHost(username: "duck")
+        host.authenticationPreference = preference
+        #expect(host.authenticationPreference == preference)
+
+        // Through `Codable` too: the whole point of storing it in `properties` is that a bookmark
+        // carrying it needs no schema change to be saved.
+        let decoded = try JSONDecoder().decode(RemoteHost.self, from: JSONEncoder().encode(host))
+        #expect(decoded.authenticationPreference == preference)
+    }
+
+    @Test("An unrecognised stored method degrades to password rather than trapping")
+    func unknownMethodDegrades() {
+        // A bookmark written by a newer version, hand-edited, or imported. Asking for a password is
+        // recoverable; refusing to load the bookmark is not.
+        var host = makeHost(username: "duck")
+        host.properties[RemoteHost.authenticationMethodKey] = "kerberos"
+        #expect(host.authenticationPreference == .password)
+    }
+
+    @Test("Choosing public key without a key on record is not public key")
+    func privateKeyNeedsAPath() {
+        var host = makeHost(username: "duck")
+        host.properties[RemoteHost.authenticationMethodKey] = AuthenticationKind.privateKey.rawValue
+        #expect(host.authenticationPreference == .password, "no path means there is nothing to offer")
+    }
+
+    @Test("Switching away from public key and back keeps the key path")
+    func switchingMethodKeepsTheKeyPath() {
+        // Retyping a path to try a password once would be a poor trade for the tidiness of clearing it.
+        var host = makeHost(username: "duck")
+        host.authenticationPreference = .privateKey(path: "/Users/duck/.ssh/id_ed25519")
+        host.authenticationPreference = .password
+        #expect(host.properties[RemoteHost.privateKeyPathKey] == "/Users/duck/.ssh/id_ed25519")
+
+        host.authenticationPreference = .privateKey(path: "/Users/duck/.ssh/id_ed25519")
+        #expect(host.authenticationPreference == .privateKey(path: "/Users/duck/.ssh/id_ed25519"))
+    }
+}
+
+@Suite("Credentials")
+struct CredentialsTests {
+
+    @Test("No description leaks a secret, whatever the method", arguments: [
+        Credentials.Method.password("hunter2"),
+        .privateKey(data: Data("KEYBYTES".utf8), passphrase: "hunter2", path: "/tmp/k"),
+        .token("hunter2"),
+        .sshAgent,
+        .anonymous
+    ])
+    func descriptionsAreRedacted(method: Credentials.Method) {
+        let credentials = Credentials(username: "duck", method: method)
+        #expect(!credentials.description.contains("hunter2"))
+        #expect(!credentials.debugDescription.contains("hunter2"))
+        #expect(!credentials.description.contains("KEYBYTES"))
+    }
+
+    @Test("A private key's path is printed, because it is not a secret and it is the useful half")
+    func keyPathIsVisible() {
+        let credentials = Credentials.privateKey(
+            username: "duck", data: Data(), passphrase: "hunter2", path: "/tmp/id_ed25519")
+        #expect(credentials.description.contains("/tmp/id_ed25519"))
+        #expect(credentials.description.contains("+passphrase"))
+    }
+
+    @Test("An agent credential has nothing to persist")
+    func agentPersistsNothing() {
+        #expect(Credentials.sshAgent(username: "duck").shouldPersist == false)
+    }
 }
 
 @Suite("RemoteItem")

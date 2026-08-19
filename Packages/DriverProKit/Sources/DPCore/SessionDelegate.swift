@@ -77,8 +77,26 @@ public struct CredentialRequest: Sendable {
         case initial
         /// The server rejected the previous attempt. Carries the server's stated reason.
         case retry(afterFailure: String)
+
         /// A private key was found but is encrypted and needs its passphrase.
+        ///
+        /// The answer to this one is a ``Credentials`` whose method is
+        /// ``Credentials/Method/password(_:)`` carrying the *passphrase*, because the sheet has one
+        /// secret field and the question it was asked establishes what that field means. Whoever
+        /// asked converts it into a ``Credentials/Method/privateKey(data:passphrase:path:)``; the
+        /// session never sees the intermediate form.
         case privateKeyPassphrase(keyPath: String)
+
+        /// A private key was chosen on the bookmark but cannot be used, so something else is needed.
+        ///
+        /// Distinct from ``retry(afterFailure:)`` because nothing reached the server: the file is
+        /// missing, unreadable, or not a key at all. Saying so is the difference between a user
+        /// fixing a path and a user staring at "authentication failed".
+        ///
+        /// - Parameters:
+        ///   - keyPath: The key that could not be used.
+        ///   - reason: What went wrong, in words fit to show a person.
+        case privateKeyUnreadable(keyPath: String, reason: String)
     }
 
     /// The connection being established.
