@@ -34,6 +34,11 @@ struct TransfersButton: View {
                 }
         }
         .help(helpText)
+        // The default `.rect(.bounds)` anchor, deliberately: a `.point(…)` anchor here presents nothing
+        // at all. SwiftUI resolves a point anchor to a zero-size positioning rect, and a toolbar item —
+        // which AppKit re-hosts into the toolbar's own view tree — has no stable bounds for it to sit
+        // in, so the popover never appears. Whatever moves the arrow off the panel's corner, it cannot
+        // be this.
         .popover(isPresented: $isShowingPanel, arrowEdge: .bottom) {
             TransfersPanel(transfers: transfers) { isShowingPanel = false }
         }

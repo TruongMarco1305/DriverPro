@@ -42,7 +42,7 @@ extension DraggedRemoteFile: Transferable {
     /// `.data` rather than a specific type because a remote entry may be anything, a folder included.
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(exportedContentType: .data) { dragged in
-            let url = try await TemporaryCopy.fetch(dragged.path, named: dragged.name, purpose: "drag")
+            let url = try await TemporaryCopy.fetch(dragged.path, named: dragged.name, purpose: .drag)
             // The temp copy is ours and nothing else will read it, so Finder may take it in place
             // rather than making a third copy.
             return SentTransferredFile(url, allowAccessingOriginalFile: true)

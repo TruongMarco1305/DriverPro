@@ -104,6 +104,8 @@ struct FileCommands {
         case ready(URL)
         /// Too big to fetch for a glance.
         case tooLarge(name: String, size: Int64)
+        /// The copy could not be fetched, with something to tell the user.
+        case failed(message: String)
         /// Nothing to preview: no selection, or a folder.
         case nothing
     }
@@ -124,13 +126,15 @@ struct FileCommands {
         case .tooLarge(let size):
             return .tooLarge(name: item.name, size: size)
         case .ready:
-            guard let url = try? await TemporaryCopy.fetch(item.path, named: item.name,
-                                                           purpose: "preview") else {
-                // The failure is already on screen as a failed row in the transfers panel; a second
-                // alert saying the same thing would be noise.
-                return .nothing
+            do {
+                // Fetched off the transfers panel entirely — a glance is not a download the user asked
+                // to keep. Which means the failure has nowhere else to appear, so it is carried back
+                // rather than swallowed.
+                return .ready(try await TemporaryCopy.fetch(item.path, named: item.name,
+                                                            purpose: .preview))
+            } catch {
+                return .failed(message: error.localizedDescription)
             }
-            return .ready(url)
         }
     }
 

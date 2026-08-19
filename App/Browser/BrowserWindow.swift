@@ -71,6 +71,8 @@ private struct BrowserDetail: View {
     @State private var previewURL: URL?
     /// The file that was too big to preview, and its size.
     @State private var oversizePreview: OversizePreview?
+    /// Whether a preview copy is being fetched. The only sign that one is: it has no transfers row.
+    @State private var isFetchingPreview = false
 
     /// Remembered across launches, so the choice is made once rather than every transfer.
     @AppStorage("overwritePolicy") private var storedPolicy = OverwritePolicy.resume.rawValue
@@ -95,7 +97,8 @@ private struct BrowserDetail: View {
                 renameTarget: $renameTarget,
                 renameText: $renameText,
                 deleteTargets: $deleteTargets,
-                oversizePreview: $oversizePreview
+                oversizePreview: $oversizePreview,
+                isFetchingPreview: isFetchingPreview
             ))
     }
 
@@ -180,6 +183,15 @@ private struct BrowserDetail: View {
                 .help("Choose what happens to files that already exist")
                 .disabled(browser.host == nil)
 
+                // Before Disconnect rather than last, which is a layout decision and not a taste one:
+                // its popover is anchored to this button and pinned to the screen's right edge, so as
+                // the final item the arrow lands on the panel's top-right corner and AppKit squares
+                // that corner off. A slot further in gives the arrow the clearance it needs. Moving the
+                // popover's own anchor would be the direct fix and does not work — `swift-notes.md` §36.
+                if let transfers {
+                    TransfersButton(transfers: transfers)
+                }
+
                 Button {
                     Task { await browser.disconnect() }
                 } label: {
@@ -187,20 +199,23 @@ private struct BrowserDetail: View {
                 }
                 .help("Close this connection")
                 .disabled(browser.host == nil)
-
-                if let transfers {
-                    TransfersButton(transfers: transfers)
-                }
             }
     }
 
     /// Previews the first selected file, fetching it first.
+    ///
+    /// The fetch is invisible to the transfers panel, so the spinner here is the only sign that a
+    /// preview of a large file is on its way, and the alert the only sign that one failed.
     private func startPreview() {
         Task {
+            isFetchingPreview = true
+            defer { isFetchingPreview = false }
+
             switch await commands.preview() {
             case .ready(let url): previewURL = url
             case .tooLarge(let name, let size):
                 oversizePreview = OversizePreview(name: name, size: size)
+            case .failed(let message): browser.report(message)
             case .nothing: break
             }
         }
@@ -248,11 +263,15 @@ private struct BrowserDialogs: ViewModifier {
     @Binding var renameText: String
     @Binding var deleteTargets: [RemoteItem]
     @Binding var oversizePreview: OversizePreview?
+    /// Whether a Quick Look copy is on its way, which the same spinner reports.
+    let isFetchingPreview: Bool
 
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .top) {
-            if browser.isLoading { ProgressView().controlSize(.small).padding(6) }
+            if browser.isLoading || isFetchingPreview {
+                ProgressView().controlSize(.small).padding(6)
+            }
         }
             .alert("New Folder", isPresented: $isCreatingFolder) {
             TextField("Name", text: $newFolderName)
