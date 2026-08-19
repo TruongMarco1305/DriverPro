@@ -12,6 +12,7 @@
 //    • `KnownHostsStore`    — reading and appending ~/.ssh/known_hosts
 //    • `HostKeyFingerprint` — OpenSSH-format SHA256 fingerprints
 //    • `PrivateKeyLocator`  — finding and classifying keys in ~/.ssh
+//    • `SSHAgentClient`     — asking a running ssh-agent what it holds, and to sign
 //
 //  It may import: Foundation, Security, CryptoKit, and DPCore.
 //  It may NOT import: SwiftUI, AppKit, Citadel, NIO, or any DPProtocol* target.
@@ -45,6 +46,20 @@ public enum CredentialError: Error, Hashable, Sendable {
 
     /// A private key was found but is not in a format we can use.
     case unsupportedKeyFormat(path: String)
+
+    /// The file is a public key. Signing needs the private half.
+    ///
+    /// Separate from ``unsupportedKeyFormat(path:)`` because it is not really a format problem — the file
+    /// is perfectly valid, it is just the wrong one of a pair, and the two sit next to each other with
+    /// almost the same name. Telling somebody their key is "in an unsupported format" when they picked
+    /// `id_ed25519.pub` sends them looking for a conversion tool.
+    case publicKeyChosen(path: String)
+
+    /// The `ssh-agent` could not be reached, refused, or said something unexpected.
+    ///
+    /// One case rather than several because the caller's options are the same for all of them: offer
+    /// another way to log in. The distinctions live in the message.
+    case agent(reason: String)
 }
 
 extension CredentialError: LocalizedError {
@@ -57,6 +72,11 @@ extension CredentialError: LocalizedError {
             "Could not access \(path): \(reason)"
         case .unsupportedKeyFormat(let path):
             "The key at \(path) is in an unsupported format."
+        case .publicKeyChosen(let path):
+            "\((path as NSString).lastPathComponent) is a public key. DriverPro needs the private half — "
+                + "the same file without the .pub extension."
+        case .agent(let reason):
+            "The SSH agent is unavailable: \(reason)"
         }
     }
 }
