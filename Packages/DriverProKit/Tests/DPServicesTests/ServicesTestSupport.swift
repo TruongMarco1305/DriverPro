@@ -89,6 +89,34 @@ enum ServicesFixture {
         return (services, credentials)
     }
 
+    /// An OpenSSH-format private key file, built rather than pasted.
+    ///
+    /// Only the header is real, and that is enough: nothing here parses key material, but
+    /// `PrivateKeyLocator` does read the cipher name out of the base64 body to decide whether a
+    /// passphrase is needed. Constructing it makes the format visible —
+    /// `"openssh-key-v1\0"`, then an SSH string (4-byte big-endian length, then bytes) naming the
+    /// cipher, which is `"none"` when the key is not encrypted.
+    ///
+    /// - Parameter encrypted: Whether the key should look as though it needs a passphrase.
+    /// - Returns: The file's URL. Its parent directory is the caller's to delete.
+    static func makeKeyFile(encrypted: Bool) throws -> URL {
+        var body = Data("openssh-key-v1\0".utf8)
+        let cipher = Data((encrypted ? "aes256-ctr" : "none").utf8)
+        body.append(contentsOf: [0, 0, 0, UInt8(cipher.count)])
+        body.append(cipher)
+
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "dp-keys-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appending(path: "id_ed25519")
+        try """
+        -----BEGIN OPENSSH PRIVATE KEY-----
+        \(body.base64EncodedString())
+        -----END OPENSSH PRIVATE KEY-----
+        """.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
     static func makeThrowawayKnownHosts() -> KnownHostsStore {
         KnownHostsStore(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "dp-known_hosts-\(UUID().uuidString)"))

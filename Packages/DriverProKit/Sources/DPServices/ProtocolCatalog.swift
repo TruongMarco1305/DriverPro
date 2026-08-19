@@ -49,6 +49,15 @@ public struct ProtocolDescriptor: Hashable, Sendable, Identifiable {
     public let defaultPort: Int
     /// Fields the connection form should offer.
     public let fields: Set<ProtocolField>
+    /// Ways of authenticating this protocol accepts, in the order a picker should offer them.
+    ///
+    /// An array, not a `Set`, because the order is the order the user sees — and the first entry is
+    /// what a new bookmark starts on. Rule 3 applied to logging in: the sheet asks what is possible
+    /// rather than assuming every protocol has a password.
+    ///
+    /// This is on the descriptor and *not* on `SessionCapabilities` on purpose. Capabilities describe
+    /// what you can do with a session that already exists; authenticating is how one comes to exist.
+    public let authentications: [AuthenticationKind]
     /// SF Symbol representing this protocol in the sidebar.
     ///
     /// On the descriptor rather than in the view, for the same reason as ``fields``: adding WebDAV
@@ -64,6 +73,7 @@ public struct ProtocolDescriptor: Hashable, Sendable, Identifiable {
     ///   - scheme: URL scheme.
     ///   - defaultPort: Default TCP port.
     ///   - fields: Fields the form should offer.
+    ///   - authentications: Ways of authenticating, in the order to offer them.
     ///   - iconName: SF Symbol for the sidebar.
     public init(
         id: ProtocolIdentifier,
@@ -72,6 +82,7 @@ public struct ProtocolDescriptor: Hashable, Sendable, Identifiable {
         scheme: String,
         defaultPort: Int,
         fields: Set<ProtocolField>,
+        authentications: [AuthenticationKind] = [.password],
         iconName: String
     ) {
         self.id = id
@@ -80,6 +91,7 @@ public struct ProtocolDescriptor: Hashable, Sendable, Identifiable {
         self.scheme = scheme
         self.defaultPort = defaultPort
         self.fields = fields
+        self.authentications = authentications
         self.iconName = iconName
     }
 }
@@ -110,6 +122,7 @@ public struct ProtocolCatalog: Sendable {
             scheme: "sftp",
             defaultPort: 22,
             fields: [.username, .password, .privateKey, .defaultPath],
+            authentications: [.password, .privateKey, .agent],
             iconName: "server.rack"
         )
     ])

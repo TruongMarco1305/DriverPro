@@ -159,6 +159,160 @@ struct CredentialFlowTests {
     }
 }
 
+/// The same guarantee as above, for the other two ways of logging in.
+@Suite("Connecting with a key or an agent")
+struct KeyAndAgentFlowTests {
+
+    /// A bookmark set to authenticate with the key at `path`.
+    private func keyHost(at path: String) -> RemoteHost {
+        var host = ServicesFixture.makeHost()
+        host.authenticationPreference = .privateKey(path: path)
+        return host
+    }
+
+    // MARK: - Private key
+
+    @Test("An unencrypted key connects with no prompt at all")
+    func unencryptedKeyNeverPrompts() async throws {
+        let key = try ServicesFixture.makeKeyFile(encrypted: false)
+        defer { try? FileManager.default.removeItem(at: key.deletingLastPathComponent()) }
+
+        let host = keyHost(at: key.path)
+        let prompt = RecordingPrompt(refusesCredentialPrompt: true)
+        let (services, store) = try await ServicesFixture.makeServices(for: host, prompt: prompt)
+
+        try await services.connect(to: host)
+
+        #expect(await prompt.credentialPromptCount == 0)
+        #expect(await store.readCount == 0, "a key connection has no business reading a password")
+    }
+
+    @Test("An encrypted key with a stored passphrase connects with no prompt")
+    func storedPassphraseSkipsThePrompt() async throws {
+        // The private-key twin of "a saved password connects with no prompt at all".
+        let key = try ServicesFixture.makeKeyFile(encrypted: true)
+        defer { try? FileManager.default.removeItem(at: key.deletingLastPathComponent()) }
+
+        let host = keyHost(at: key.path)
+        let prompt = RecordingPrompt(refusesCredentialPrompt: true)
+        let store = InMemoryCredentialStore(passphrases: [key.path: "hunter2"])
+        let (services, _) = try await ServicesFixture.makeServices(
+            for: host, prompt: prompt, credentials: store)
+
+        try await services.connect(to: host)
+
+        #expect(await prompt.credentialPromptCount == 0)
+        #expect(await store.passphraseReadCount == 1, "the passphrase came from the store")
+    }
+
+    @Test("An encrypted key with no stored passphrase asks for it, and names the key")
+    func encryptedKeyPromptsForItsPassphrase() async throws {
+        let key = try ServicesFixture.makeKeyFile(encrypted: true)
+        defer { try? FileManager.default.removeItem(at: key.deletingLastPathComponent()) }
+
+        let host = keyHost(at: key.path)
+        // The sheet has one secret field, so a passphrase comes back in the `.password` case.
+        let prompt = RecordingPrompt(
+            credentials: .password(username: "duck", password: "hunter2", shouldPersist: true))
+        let (services, store) = try await ServicesFixture.makeServices(for: host, prompt: prompt)
+
+        try await services.connect(to: host)
+
+        let asked = try #require(await prompt.credentialQuestions.first)
+        guard case .privateKeyPassphrase(let keyPath) = asked.reason else {
+            Issue.record("expected a passphrase request, got \(asked.reason)")
+            return
+        }
+        #expect(keyPath == key.path, "the sheet has to say which key it is unlocking")
+        #expect(await store.hasPassphrase(forPrivateKeyAt: key.path),
+                "an accepted passphrase is saved against the key's path")
+        #expect(await !store.hasPassword(for: host), "it was a passphrase, not a password")
+    }
+
+    @Test("A passphrase for a connection that failed is not saved")
+    func refusedPassphraseIsNotSaved() async throws {
+        let key = try ServicesFixture.makeKeyFile(encrypted: true)
+        defer { try? FileManager.default.removeItem(at: key.deletingLastPathComponent()) }
+
+        let host = keyHost(at: key.path)
+        let prompt = RecordingPrompt(
+            hostKeyDecision: .reject,
+            credentials: .password(username: "duck", password: "hunter2", shouldPersist: true))
+        let (services, store) = try await ServicesFixture.makeServices(for: host, prompt: prompt)
+
+        await #expect(throws: SessionError.hostKeyRejected) {
+            try await services.connect(to: host)
+        }
+        #expect(await !store.hasPassphrase(forPrivateKeyAt: key.path))
+    }
+
+    @Test("Cancelling the passphrase prompt fails the connection rather than trying the key anyway")
+    func cancellingThePassphraseFails() async throws {
+        let key = try ServicesFixture.makeKeyFile(encrypted: true)
+        defer { try? FileManager.default.removeItem(at: key.deletingLastPathComponent()) }
+
+        let host = keyHost(at: key.path)
+        let (services, _) = try await ServicesFixture.makeServices(
+            for: host, prompt: RecordingPrompt(credentials: nil))
+
+        await #expect(throws: SessionError.self) { try await services.connect(to: host) }
+    }
+
+    @Test("A key that cannot be read says so, rather than reporting a login failure")
+    func unreadableKeyExplainsItself() async throws {
+        // The file is gone, moved, or was never a key. Nothing reached the server, so calling this an
+        // authentication failure would send the user looking in the wrong place.
+        let host = keyHost(at: "/nonexistent-\(UUID().uuidString)/id_ed25519")
+        let prompt = RecordingPrompt(
+            credentials: .password(username: "duck", password: "hunter2"))
+        let (services, _) = try await ServicesFixture.makeServices(for: host, prompt: prompt)
+
+        try await services.connect(to: host)
+
+        let asked = try #require(await prompt.credentialQuestions.first)
+        guard case .privateKeyUnreadable(let keyPath, let reason) = asked.reason else {
+            Issue.record("expected an unreadable-key request, got \(asked.reason)")
+            return
+        }
+        #expect(keyPath.hasSuffix("id_ed25519"))
+        #expect(!reason.isEmpty, "the user needs to be told what is wrong with the file")
+    }
+
+    // MARK: - ssh-agent
+
+    @Test("An agent connection asks nothing and reads nothing")
+    func agentNeitherPromptsNorReadsTheStore() async throws {
+        var host = ServicesFixture.makeHost()
+        host.authenticationPreference = .agent
+
+        let prompt = RecordingPrompt(refusesCredentialPrompt: true)
+        let store = InMemoryCredentialStore(passwords: [host.id: "hunter2"])
+        let (services, _) = try await ServicesFixture.makeServices(
+            for: host, prompt: prompt, credentials: store)
+
+        try await services.connect(to: host)
+
+        #expect(await prompt.credentialPromptCount == 0)
+        // The agent holds the key. Reaching for a saved password would be both pointless and a way to
+        // connect as something other than what the bookmark says.
+        #expect(await store.readCount == 0)
+    }
+
+    @Test("An agent connection with no user name on the bookmark falls back to the local account")
+    func agentFallsBackToTheLocalUsername() async throws {
+        // What `ssh host` does when there is no `User` line. There is no prompt in the way to ask.
+        var host = ServicesFixture.makeHost(username: nil)
+        host.authenticationPreference = .agent
+
+        let coordinator = CredentialCoordinator(
+            store: InMemoryCredentialStore(), prompt: RecordingPrompt(refusesCredentialPrompt: true))
+        let credentials = await coordinator.session(
+            host, needsCredentials: CredentialRequest(host: host, reason: .initial))
+
+        #expect(try #require(credentials).username == NSUserName())
+    }
+}
+
 @Suite("ProtocolCatalog")
 struct ProtocolCatalogTests {
 
@@ -179,6 +333,20 @@ struct ProtocolCatalogTests {
         #expect(descriptor.fields.contains(.username))
         #expect(descriptor.fields.contains(.password))
         #expect(descriptor.fields.contains(.privateKey))
+    }
+
+    @Test("SFTP advertises all three ways of logging in, password first")
+    func advertisesAuthentications() throws {
+        let descriptor = try #require(ProtocolCatalog.live.descriptor(for: .sftp))
+        #expect(descriptor.authentications == [.password, .privateKey, .agent])
+    }
+
+    @Test("Every protocol offers at least one way to log in")
+    func everyProtocolCanAuthenticate() {
+        // A descriptor with an empty list would render a connection form with no way to prove anything.
+        for entry in ProtocolCatalog.live.descriptors {
+            #expect(!entry.authentications.isEmpty, "\(entry.displayName) offers no authentication")
+        }
     }
 
     @Test("An unsupported protocol has no descriptor and no default port")
