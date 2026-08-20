@@ -127,6 +127,14 @@ public struct ProtocolCatalog: Sendable {
         )
     ])
 
+    /// Every protocol this build can connect with.
+    ///
+    /// What an import checks a `.duck` file against: a bookmark for a protocol not in here would sit in
+    /// the sidebar and fail the moment it was clicked.
+    public var supportedIdentifiers: Set<ProtocolIdentifier> {
+        Set(descriptors.map(\.id))
+    }
+
     /// The descriptor for a protocol, or `nil` if it is not supported.
     /// - Parameter identifier: Which protocol.
     public func descriptor(for identifier: ProtocolIdentifier) -> ProtocolDescriptor? {

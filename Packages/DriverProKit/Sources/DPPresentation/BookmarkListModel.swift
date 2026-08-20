@@ -66,6 +66,60 @@ public final class BookmarkListModel {
         }
     }
 
+    // MARK: - Cyberduck interchange
+
+    /// Imports `.duck` files and reloads.
+    ///
+    /// - Parameters:
+    ///   - urls: Files or folders, as a picker or a drop hands them over.
+    ///   - supported: Protocols this build can connect with, from the catalog.
+    /// - Returns: What happened, for the view to report, or `nil` if the import itself failed.
+    @discardableResult
+    public func importDuck(
+        from urls: [URL],
+        supported: Set<ProtocolIdentifier>
+    ) async -> DuckImportSummary? {
+        do {
+            let summary = try await store.importDuck(from: urls, supported: supported)
+            await reload()
+            return summary
+        } catch {
+            errorMessage = BrowserModel.message(for: error)
+            return nil
+        }
+    }
+
+    /// Writes every bookmark to a folder as `.duck` files.
+    ///
+    /// - Parameter directory: Where to write.
+    /// - Returns: How many were written, or `nil` if the export failed.
+    @discardableResult
+    public func exportDuck(to directory: URL) async -> Int? {
+        do {
+            return try await store.exportDuck(to: directory)
+        } catch {
+            errorMessage = BrowserModel.message(for: error)
+            return nil
+        }
+    }
+
+    /// Writes one bookmark to one `.duck` file.
+    ///
+    /// - Parameters:
+    ///   - host: The bookmark to write.
+    ///   - file: Where to write it.
+    /// - Returns: Whether it was written.
+    @discardableResult
+    public func exportDuck(_ host: RemoteHost, to file: URL) async -> Bool {
+        do {
+            try await store.exportDuck(host, to: file)
+            return true
+        } catch {
+            errorMessage = BrowserModel.message(for: error)
+            return false
+        }
+    }
+
     /// Clears the current message.
     public func dismissError() {
         errorMessage = nil

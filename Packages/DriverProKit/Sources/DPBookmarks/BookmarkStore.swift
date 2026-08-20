@@ -28,6 +28,43 @@ extension BookmarkError: LocalizedError {
     }
 }
 
+/// What an import of `.duck` files did.
+///
+/// Counts rather than a bare number, because "8 imported" is only half the story when three were
+/// skipped: the user needs to know a protocol is not supported yet, not wonder where their bookmarks
+/// went.
+public struct DuckImportSummary: Hashable, Sendable {
+
+    /// Bookmarks saved.
+    public var imported = 0
+    /// Files that were not bookmarks, or could not be read.
+    public var unreadable = 0
+    /// Bookmarks skipped, by the protocol this build cannot speak.
+    public var unsupported: [ProtocolIdentifier: Int] = [:]
+
+    /// Creates a summary.
+    ///
+    /// - Parameters:
+    ///   - imported: Bookmarks saved.
+    ///   - unreadable: Files that were not bookmarks.
+    ///   - unsupported: Skipped bookmarks, by protocol.
+    public init(
+        imported: Int = 0,
+        unreadable: Int = 0,
+        unsupported: [ProtocolIdentifier: Int] = [:]
+    ) {
+        self.imported = imported
+        self.unreadable = unreadable
+        self.unsupported = unsupported
+    }
+
+    /// How many were skipped because their protocol is not supported.
+    public var unsupportedCount: Int { unsupported.values.reduce(0, +) }
+
+    /// Whether the import found nothing at all to do.
+    public var isEmpty: Bool { imported == 0 && unreadable == 0 && unsupported.isEmpty }
+}
+
 /// Saved connections, in the database.
 ///
 /// **No secrets are stored here.** `RemoteHost` carries the address and the Keychain coordinates, never
@@ -222,6 +259,137 @@ public actor BookmarkStore {
             imported += 1
         }
         return imported
+    }
+
+    // MARK: - Cyberduck interchange
+
+    /// Reads `.duck` files, saving every bookmark DriverPro can use.
+    ///
+    /// Accepts files and directories together, because both a picker and a drop can hand over either.
+    /// A directory is scanned one level deep for `*.duck`, which is how Cyberduck lays its own out.
+    ///
+    /// Nothing throws for a bad file: one unreadable bookmark in a folder of twenty must not abandon
+    /// the other nineteen, so failures are counted and returned instead.
+    ///
+    /// - Parameters:
+    ///   - urls: Files or directories to read.
+    ///   - supported: Protocols this build can connect with. Anything else is counted as unsupported
+    ///     rather than imported — a bookmark that fails the moment it is clicked is worse than none.
+    /// - Returns: What happened, in enough detail to tell the user.
+    /// - Throws: ``BookmarkError/fileUnavailable(path:reason:)`` if a directory cannot be listed, or
+    ///   ``DatabaseError`` if a write fails.
+    @discardableResult
+    public func importDuck(
+        from urls: [URL],
+        supported: Set<ProtocolIdentifier>
+    ) async throws -> DuckImportSummary {
+        var summary = DuckImportSummary()
+
+        for file in try Self.duckFiles(in: urls) {
+            guard let data = try? Data(contentsOf: file) else {
+                summary.unreadable += 1
+                continue
+            }
+
+            switch DuckFormat.decode(data, supported: supported) {
+            case .bookmark(let host):
+                try await save(host)
+                summary.imported += 1
+            case .unsupported(let identifier):
+                summary.unsupported[identifier, default: 0] += 1
+            case .unreadable:
+                summary.unreadable += 1
+            }
+        }
+        return summary
+    }
+
+    /// Writes every bookmark to a directory as one `.duck` file each.
+    ///
+    /// - Parameter directory: Where to write. Created if missing.
+    /// - Returns: How many bookmarks were written.
+    /// - Throws: ``BookmarkError/fileUnavailable(path:reason:)`` if a file cannot be written.
+    @discardableResult
+    public func exportDuck(to directory: URL) async throws -> Int {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            throw BookmarkError.fileUnavailable(path: directory.path, reason: error.localizedDescription)
+        }
+
+        let hosts = try await load()
+        var used: Set<String> = []
+
+        for host in hosts {
+            let file = directory.appending(path: Self.uniqueFileName(for: host, avoiding: &used))
+            do {
+                try DuckFormat.encode(host).write(to: file, options: .atomic)
+            } catch {
+                throw BookmarkError.fileUnavailable(path: file.path, reason: error.localizedDescription)
+            }
+        }
+        return hosts.count
+    }
+
+    /// Writes one bookmark to one `.duck` file.
+    ///
+    /// The single-bookmark counterpart to ``exportDuck(to:)``, for sharing one connection rather than
+    /// backing up all of them.
+    ///
+    /// - Parameters:
+    ///   - host: The bookmark to write.
+    ///   - file: Where to write it. Any existing file is replaced.
+    /// - Throws: ``BookmarkError/fileUnavailable(path:reason:)`` if it cannot be written.
+    public func exportDuck(_ host: RemoteHost, to file: URL) async throws {
+        do {
+            try DuckFormat.encode(host).write(to: file, options: .atomic)
+        } catch {
+            throw BookmarkError.fileUnavailable(path: file.path, reason: error.localizedDescription)
+        }
+    }
+
+    /// Every `.duck` file among the given files and directories.
+    private static func duckFiles(in urls: [URL]) throws -> [URL] {
+        var files: [URL] = []
+
+        for url in urls {
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            guard isDirectory else {
+                if url.pathExtension.lowercased() == DuckFormat.fileExtension { files.append(url) }
+                continue
+            }
+
+            do {
+                let contents = try FileManager.default.contentsOfDirectory(
+                    at: url, includingPropertiesForKeys: nil)
+                files += contents.filter { $0.pathExtension.lowercased() == DuckFormat.fileExtension }
+            } catch {
+                throw BookmarkError.fileUnavailable(path: url.path, reason: error.localizedDescription)
+            }
+        }
+        return files
+    }
+
+    /// A file name no earlier bookmark in this export has taken.
+    ///
+    /// Two bookmarks may share a display name — the same server under two accounts, say — and the
+    /// second must not overwrite the first.
+    private static func uniqueFileName(for host: RemoteHost, avoiding used: inout Set<String>) -> String {
+        let name = DuckFormat.fileName(for: host)
+        guard used.contains(name) else {
+            used.insert(name)
+            return name
+        }
+
+        let stem = (name as NSString).deletingPathExtension
+        for suffix in 2... {
+            let candidate = "\(stem) \(suffix).\(DuckFormat.fileExtension)"
+            if !used.contains(candidate) {
+                used.insert(candidate)
+                return candidate
+            }
+        }
+        return name       // unreachable: the loop only ends by returning
     }
 
     // MARK: - Mapping
