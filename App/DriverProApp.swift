@@ -6,6 +6,7 @@
 //  goes through DPServices. No protocol target is imported here.
 //
 
+import DPBookmarks
 import DPCore
 import DPPresentation
 import DPServices
@@ -16,6 +17,10 @@ struct DriverProApp: App {
 
     /// The whole application, built once.
     @State private var environment = AppEnvironment()
+
+    private var interchange: BookmarkInterchange {
+        BookmarkInterchange(environment: environment)
+    }
 
     /// Closes connections before the process exits.
     @NSApplicationDelegateAdaptor(TerminationDelegate.self) private var delegate
@@ -30,6 +35,16 @@ struct DriverProApp: App {
             CommandGroup(after: .newItem) {
                 Button("Open Connection…") { environment.connectionSheet = .create }
                     .keyboardShortcut("k")
+
+                Divider()
+
+                Button("Import Bookmarks…") {
+                    Task { environment.importSummary = await interchange.chooseAndImport() }
+                }
+                Button("Export Bookmarks…") {
+                    Task { _ = await interchange.chooseAndExport() }
+                }
+                .disabled(environment.bookmarks?.bookmarks.isEmpty ?? true)
             }
         }
     }
@@ -57,6 +72,12 @@ final class AppEnvironment {
 
     /// The connection sheet that is up, or `nil` when none is.
     var connectionSheet: ConnectionSheetMode?
+
+    /// What the last `.duck` import did, until the alert reporting it is dismissed.
+    ///
+    /// On the environment rather than in a view because two places start an import — the File menu and
+    /// the sidebar's drop target — and both report it through the same alert.
+    var importSummary: DuckImportSummary?
 
     init() {
         do {

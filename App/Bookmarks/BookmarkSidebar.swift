@@ -3,6 +3,7 @@
 //  DriverPro
 //
 
+import DPBookmarks
 import DPCore
 import DPPresentation
 import DPServices
@@ -15,6 +16,9 @@ struct BookmarkSidebar: View {
 
     /// Which row the pointer is over. A `List` of plain buttons gives no feedback of its own.
     @State private var hovered: RemoteHost.ID?
+
+    /// Whether a `.duck` file is hovering over the list.
+    @State private var isDropTarget = false
 
     var body: some View {
         @Bindable var environment = environment
@@ -43,6 +47,23 @@ struct BookmarkSidebar: View {
         // Clipped on the container, not the rows, so the list scrolls under a rounded edge rather than
         // each row being rounded.
         .clipShape(.rect(topLeadingRadius: 10, topTrailingRadius: 10))
+        // Dropping a `.duck` file here imports it — Cyberduck's own gesture, and the reason someone
+        // arriving with a folder of bookmarks does not have to find a menu first.
+        .dropDestination(for: URL.self) { urls, _ in
+            Task { await importDropped(urls) }
+            return true
+        } isTargeted: {
+            isDropTarget = $0
+        }
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(2)
+                    .allowsHitTesting(false)
+            }
+        }
+        .modifier(BookmarkImportAlert(summary: $environment.importSummary, catalog: catalog))
         .toolbar {
             Button {
                 environment.connectionSheet = .create
@@ -51,6 +72,15 @@ struct BookmarkSidebar: View {
             }
             .help("Connect to a server (⌘K)")
         }
+    }
+
+    private var catalog: ProtocolCatalog {
+        environment.services?.catalog ?? .live
+    }
+
+    private func importDropped(_ urls: [URL]) async {
+        environment.importSummary = await BookmarkInterchange(environment: environment)
+            .importing(dropped: urls)
     }
 
     private func row(for host: RemoteHost, in bookmarks: BookmarkListModel) -> some View {
@@ -97,6 +127,14 @@ struct BookmarkSidebar: View {
         .contextMenu {
             Button("Edit Bookmark…") { environment.connectionSheet = .edit(host) }
 
+            // One file, shareable. No secret goes with it — a `.duck` holds the address and the
+            // Keychain coordinates, never the password.
+            Button("Export Bookmark…") {
+                Task { await BookmarkInterchange(environment: environment).chooseAndExport(host) }
+            }
+
+            Divider()
+
             // Deleting a bookmark leaves its Keychain item alone: the two have separate lifetimes,
             // and silently removing a password would be surprising.
             Button("Delete Bookmark", role: .destructive) {
@@ -114,5 +152,26 @@ struct BookmarkSidebar: View {
     /// The symbol for a bookmark's protocol, from the catalog rather than a `switch` here.
     private func icon(for host: RemoteHost) -> String {
         ProtocolCatalog.live.descriptor(for: host.protocolIdentifier)?.iconName ?? "server.rack"
+    }
+}
+
+/// Reports what an import did, wherever it was started from.
+///
+/// A `ViewModifier` because the sidebar shows it for a drop and the File menu shows it for a picker,
+/// and one wording is better than two.
+struct BookmarkImportAlert: ViewModifier {
+
+    @Binding var summary: DuckImportSummary?
+    let catalog: ProtocolCatalog
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Bookmarks imported",
+            isPresented: Binding(get: { summary != nil }, set: { if !$0 { summary = nil } })
+        ) {
+            Button("OK") { summary = nil }
+        } message: {
+            Text(summary.map { BookmarkInterchange.message(for: $0, catalog: catalog) } ?? "")
+        }
     }
 }
