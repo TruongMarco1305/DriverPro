@@ -14,6 +14,7 @@
 import DPCore
 import DPCredentials
 import DPProtocolSFTP
+import DPProtocolWebDAV
 import Foundation
 
 /// A field the connection form may need to show.
@@ -26,6 +27,11 @@ public enum ProtocolField: String, Hashable, Sendable, CaseIterable {
     case privateKey
     /// A directory to open on connecting.
     case defaultPath
+    /// Where the server publishes its file space, when that is not the root.
+    ///
+    /// WebDAV's reason for existing: Nextcloud serves at `/remote.php/dav/files/<user>/`, a plain
+    /// server at `/`. Configuration rather than a branch — see ``RemoteHost/webdavBasePathKey``.
+    case basePath
     /// An option to connect without credentials.
     case anonymous
 }
@@ -124,6 +130,22 @@ public struct ProtocolCatalog: Sendable {
             fields: [.username, .password, .privateKey, .defaultPath],
             authentications: [.password, .privateKey, .agent],
             iconName: "server.rack"
+        ),
+        ProtocolDescriptor(
+            id: .webdav,
+            displayName: "WebDAV",
+            summary: "Files over HTTPS (e.g NextCloud, NAS,...)",
+            // Always the secure spelling. WebDAV authenticates with Basic, so plain HTTP puts the
+            // password on the wire in clear; a self-signed certificate — the usual reason people reach
+            // for HTTP — is handled by the trust prompt instead. `webdav.allowsInsecureHTTP` remains a
+            // bookmark property for the integration tests, and is deliberately not offered here.
+            scheme: "davs",
+            defaultPort: 443,
+            fields: [.username, .password, .basePath, .defaultPath],
+            // Only one: no keys, no agent. The picker offers what the protocol has rather than what
+            // SFTP happens to have.
+            authentications: [.password],
+            iconName: "cloud"
         )
     ])
 
@@ -158,7 +180,14 @@ public struct ProtocolCatalog: Sendable {
         trustedCertificates: TrustedCertificateStore = TrustedCertificateStore()
     ) -> any SessionFactory {
         ClosureSessionFactory([
-            .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) }
+            .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) },
+            .webdav: { host in
+                // Failable because a bookmark can name something that is not a URL. Throwing here turns
+                // that into an error the user sees rather than a crash.
+                guard let session = WebDAVSession(host: host, trustedCertificates: trustedCertificates)
+                else { throw SessionError.unreachable(host: host.hostname, reason: "not a valid address") }
+                return session
+            }
         ])
     }
 }

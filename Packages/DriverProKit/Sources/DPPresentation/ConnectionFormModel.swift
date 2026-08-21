@@ -38,6 +38,11 @@ public final class ConnectionFormModel {
     public var password = ""
     /// Directory to open on connecting.
     public var defaultPath = ""
+    /// Where the server publishes its file space, when that is not the root.
+    ///
+    /// Distinct from ``defaultPath``: this says where the *file system* begins, and everything above
+    /// this layer then works in paths relative to it. Nextcloud's is `/remote.php/dav/files/<user>`.
+    public var basePath = ""
     /// Sidebar label.
     public var nickname = ""
     /// Free-text note about the connection, stored on the bookmark.
@@ -260,6 +265,16 @@ public final class ConnectionFormModel {
         let trimmedNickname = nickname.trimmingCharacters(in: .whitespaces)
         let trimmedPath = defaultPath.trimmingCharacters(in: .whitespaces)
         let trimmedDetails = details.trimmingCharacters(in: .whitespaces)
+        let trimmedBasePath = basePath.trimmingCharacters(in: .whitespaces)
+
+        // Preserved rather than replaced: `properties` also carries what a `.duck` import kept and what
+        // the authentication choice writes, and rebuilding it here would drop both.
+        var properties = loadedProperties
+        if trimmedBasePath.isEmpty {
+            properties.removeValue(forKey: RemoteHost.webdavBasePathKey)
+        } else {
+            properties[RemoteHost.webdavBasePathKey] = trimmedBasePath
+        }
 
         var host = RemoteHost(
             id: id ?? editingID ?? UUID(),
@@ -270,7 +285,7 @@ public final class ConnectionFormModel {
             defaultPath: trimmedPath.isEmpty ? nil : RemotePath(trimmedPath),
             nickname: trimmedNickname.isEmpty ? nil : trimmedNickname,
             comment: trimmedDetails.isEmpty ? nil : trimmedDetails,
-            properties: loadedProperties
+            properties: properties
         )
         host.authenticationPreference = authenticationPreference
         return host
@@ -316,6 +331,7 @@ public final class ConnectionFormModel {
         port = String(host.port)
         username = host.username ?? ""
         defaultPath = host.defaultPath?.pathString ?? ""
+        basePath = host.properties[RemoteHost.webdavBasePathKey] ?? ""
         nickname = host.nickname ?? ""
         details = host.comment ?? ""
         password = ""

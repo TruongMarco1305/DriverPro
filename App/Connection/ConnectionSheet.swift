@@ -86,6 +86,12 @@ struct ConnectionSheet: View {
                         TextField("User Name", text: $form.username)
                     }
                     authentication
+                    if form.shows(.basePath) {
+                        // The placeholder is the documentation: nobody remembers Nextcloud's DAV root,
+                        // and a blank field meaning "the server root" is right for everything else.
+                        TextField("WebDAV Path", text: $form.basePath,
+                                  prompt: Text("/remote.php/dav/files/\(form.username.isEmpty ? "user" : form.username)"))
+                    }
                     if form.shows(.defaultPath) {
                         TextField("Path", text: $form.defaultPath, prompt: Text("Optional"))
                     }

@@ -18,6 +18,17 @@ extension RemoteHost {
     /// it lands on the right field.
     public static let privateKeyPathKey = "sftp.privateKeyPath"
 
+    /// The ``properties`` key holding a WebDAV server's DAV root.
+    ///
+    /// `/remote.php/dav/files/duck` for Nextcloud, empty for a server that publishes at `/`. It lives
+    /// here rather than in the WebDAV target because the *connection form* writes it, and
+    /// `DPPresentation` may not import a protocol target — the same reason ``privateKeyPathKey`` is
+    /// here rather than in the SFTP one.
+    ///
+    /// That this is a property rather than a field on `RemoteHost` is the claim M3 set out to test: a
+    /// vendor's layout should be configuration, not a branch.
+    public static let webdavBasePathKey = "webdav.basePath"
+
     // MARK: - Preference
 
     /// How this bookmark authenticates, stored in ``properties``.

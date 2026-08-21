@@ -147,7 +147,7 @@ let package = Package(
         .target(
             name: "DPServices",
             dependencies: ["DPCore", "DPCredentials", "DPBookmarks", "DPDatabase", "DPTransfer",
-                           "DPProtocolSFTP"],
+                           "DPProtocolSFTP", "DPProtocolWebDAV"],
             swiftSettings: swiftSettings
         ),
         .testTarget(

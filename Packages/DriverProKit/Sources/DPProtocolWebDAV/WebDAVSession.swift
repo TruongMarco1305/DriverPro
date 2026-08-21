@@ -21,8 +21,9 @@ public actor WebDAVSession: Session {
     /// The `properties` key holding the server's DAV root, such as `/remote.php/dav/files/duck`.
     ///
     /// On the bookmark rather than in code because it is the *only* thing that makes Nextcloud different
-    /// from a plain server — see ``WebDAVPaths``.
-    public static let basePathKey = "webdav.basePath"
+    /// from a plain server — see ``WebDAVPaths``. Defined in `DPCore` so the connection form can write
+    /// it; this is the same constant, not a second spelling of it.
+    public static let basePathKey = RemoteHost.webdavBasePathKey
 
     /// The `properties` key that allows plain HTTP. Absent means HTTPS, which is what anyone should
     /// want; the test container is the reason it can be turned off at all.

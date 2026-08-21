@@ -29,22 +29,28 @@ public protocol SessionFactory: Sendable {
 /// ```
 public struct ClosureSessionFactory: SessionFactory {
 
-    private let builders: [ProtocolIdentifier: @Sendable (RemoteHost) -> any Session]
+    private let builders: [ProtocolIdentifier: @Sendable (RemoteHost) throws -> any Session]
 
     /// Creates a factory from a table of builders.
+    ///
+    /// The closures may throw: not every bookmark can be turned into a session even when its protocol is
+    /// supported — a WebDAV bookmark whose host name does not make a URL, for instance. A non-throwing
+    /// closure still fits, so existing tables are unaffected.
+    ///
     /// - Parameter builders: One closure per supported protocol.
-    public init(_ builders: [ProtocolIdentifier: @Sendable (RemoteHost) -> any Session]) {
+    public init(_ builders: [ProtocolIdentifier: @Sendable (RemoteHost) throws -> any Session]) {
         self.builders = builders
     }
 
     /// Builds a session using the closure registered for the bookmark's protocol.
     /// - Parameter host: The bookmark to build for.
     /// - Returns: An unconnected session.
-    /// - Throws: ``SessionError/unknownProtocol(_:)`` when no closure is registered.
+    /// - Throws: ``SessionError/unknownProtocol(_:)`` when no closure is registered, or whatever the
+    ///   closure throws when the bookmark cannot produce a session.
     public func makeSession(for host: RemoteHost) throws -> any Session {
         guard let build = builders[host.protocolIdentifier] else {
             throw SessionError.unknownProtocol(host.protocolIdentifier)
         }
-        return build(host)
+        return try build(host)
     }
 }

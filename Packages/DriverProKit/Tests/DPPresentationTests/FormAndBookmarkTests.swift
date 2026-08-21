@@ -161,6 +161,90 @@ struct ConnectionFormModelTests {
         #expect(form.password.isEmpty, "a stored password is never loaded back into a text field")
     }
 
+    // MARK: - WebDAV
+
+    @Test("WebDAV offers only a password, because that is all it has")
+    func webdavOffersOnlyPassword() {
+        // The picker reads the descriptor rather than listing SFTP's methods for every protocol. Adding
+        // a backend with different authentication should need no view change at all.
+        let form = ConnectionFormModel()
+        form.protocolIdentifier = .webdav
+
+        #expect(form.offeredAuthentications == [.password])
+        #expect(form.shows(.basePath), "the DAV root is asked for")
+        #expect(!form.shows(.privateKey), "and keys are not")
+    }
+
+    @Test("Choosing WebDAV moves the port to 443")
+    func webdavDefaultsToHTTPS() {
+        let form = ConnectionFormModel()
+        form.protocolIdentifier = .webdav
+        #expect(form.port == "443")
+    }
+
+    @Test("The DAV root round-trips through the bookmark")
+    func basePathRoundTrips() throws {
+        // The whole Nextcloud story: a vendor's layout is a property on the bookmark, not a branch in
+        // the code.
+        let form = ConnectionFormModel()
+        form.protocolIdentifier = .webdav
+        form.hostname = "cloud.example.com"
+        form.username = "duck"
+        form.password = "hunter2"
+        form.basePath = "  /remote.php/dav/files/duck  "
+
+        let host = try #require(form.makeHost())
+        #expect(host.properties[RemoteHost.webdavBasePathKey] == "/remote.php/dav/files/duck",
+                "trimmed like every other field")
+
+        let reloaded = ConnectionFormModel()
+        reloaded.load(from: host)
+        #expect(reloaded.basePath == "/remote.php/dav/files/duck")
+    }
+
+    @Test("A blank DAV root means the server root, not an empty property")
+    func blankBasePathIsAbsent() throws {
+        // A plain WebDAV server publishes at `/`, and an empty string in `properties` would be a value
+        // that has to be special-cased everywhere it is read.
+        let form = ConnectionFormModel()
+        form.protocolIdentifier = .webdav
+        form.hostname = "dav.example.com"
+        form.password = "hunter2"
+        form.basePath = "   "
+
+        #expect(try #require(form.makeHost()).properties[RemoteHost.webdavBasePathKey] == nil)
+    }
+
+    @Test("Clearing the DAV root on an edit removes it")
+    func clearingBasePathRemovesIt() throws {
+        var host = RemoteHost(protocolIdentifier: .webdav, hostname: "cloud.example.com", port: 443,
+                              username: "duck")
+        host.properties[RemoteHost.webdavBasePathKey] = "/remote.php/dav/files/duck"
+
+        let form = ConnectionFormModel()
+        form.load(from: host)
+        form.basePath = ""
+
+        #expect(try #require(form.makeHost()).properties[RemoteHost.webdavBasePathKey] == nil)
+    }
+
+    @Test("Editing a WebDAV bookmark keeps properties it does not know about")
+    func editingKeepsForeignProperties() throws {
+        // `duck.unmapped` from a Cyberduck import, for instance. Rebuilding `properties` from the form
+        // would silently drop it.
+        var host = RemoteHost(protocolIdentifier: .webdav, hostname: "cloud.example.com", port: 443,
+                              username: "duck")
+        host.properties["duck.unmapped"] = "opaque"
+
+        let form = ConnectionFormModel()
+        form.load(from: host)
+        form.basePath = "/dav"
+
+        let saved = try #require(form.makeHost())
+        #expect(saved.properties["duck.unmapped"] == "opaque")
+        #expect(saved.properties[RemoteHost.webdavBasePathKey] == "/dav")
+    }
+
     // MARK: - Editing
 
     @Test("Editing keeps the bookmark's identity, so a save updates rather than duplicates")

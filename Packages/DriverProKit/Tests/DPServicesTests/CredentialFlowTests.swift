@@ -351,9 +351,19 @@ struct ProtocolCatalogTests {
 
     @Test("An unsupported protocol has no descriptor and no default port")
     func unsupportedProtocol() {
-        let webdav = ProtocolIdentifier.webdav
-        #expect(ProtocolCatalog.live.descriptor(for: webdav) == nil)
-        #expect(ProtocolCatalog.live.defaultPort(for: webdav) == nil)
+        // A protocol nothing will ever implement, so this test does not have to move every time a
+        // milestone lands. It used to name WebDAV, and M3 made it wrong — which is the right kind of
+        // failing test, but a rewrite each milestone is a chore worth designing out.
+        let unknown = ProtocolIdentifier(rawValue: "gopher")
+        #expect(ProtocolCatalog.live.descriptor(for: unknown) == nil)
+        #expect(ProtocolCatalog.live.defaultPort(for: unknown) == nil)
+
+        // And the ones that are genuinely still to come. This *does* move as they land, which is the
+        // point: it fails the moment a protocol is added to the catalog without its tests.
+        for planned in [ProtocolIdentifier.s3, .ftp] {
+            #expect(ProtocolCatalog.live.descriptor(for: planned) == nil,
+                    "\(planned.rawValue) is in the catalog now — update this test with its milestone")
+        }
     }
 
     @Test("The factory builds a session for a supported protocol and refuses others")
