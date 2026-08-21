@@ -71,7 +71,12 @@ enum WebDAVUpload {
 
         do {
             let (_, response) = try await session.data(for: request)
-            _ = try await writer.value
+
+            // The response settles it, so the writer is finished with either way. Waiting for it here
+            // would hang whenever a server answers *before* reading the body — a 401, a 403, a 507, or
+            // a proxy refusing the encoding — because the pump would be writing into a stream nobody
+            // reads again.
+            writer.cancel()
 
             guard let http = response as? HTTPURLResponse else {
                 throw SessionError.protocolViolation("The server did not answer with HTTP.")
@@ -79,6 +84,12 @@ enum WebDAVUpload {
             guard (200..<300).contains(http.statusCode) else {
                 throw WebDAVTransport.mapStatus(http.statusCode, path: path)
             }
+
+            // One reason to override a success: the *source* failed. A local file that became
+            // unreadable half way through produces a truncated body the server may well accept, and
+            // reporting that as a completed upload would be a lie about what is on the server.
+            try await surfaceSourceFailure(from: writer)
+
         } catch let error as URLError {
             writer.cancel()
             throw WebDAVTransport.mapURLError(error, host: request.url?.host() ?? "the server")
@@ -86,6 +97,13 @@ enum WebDAVUpload {
             writer.cancel()
             throw error
         }
+    }
+
+    /// Rethrows a failure that came from the bytes being uploaded, ignoring one that came from stopping.
+    private static func surfaceSourceFailure(from writer: Task<Void, any Error>) async throws {
+        guard case .failure(let error) = await writer.result else { return }
+        guard !(error is CancellationError) else { return }
+        throw error
     }
 
     /// Writes every chunk into the output half, waiting when there is no room.
@@ -114,10 +132,10 @@ enum WebDAVUpload {
                     return output.write(base, maxLength: raw.count)
                 }
 
-                guard written > 0 else {
-                    throw output.streamError.map { SessionError.transport($0.localizedDescription) }
-                        ?? SessionError.transport("The upload stream closed early.")
-                }
+                // The reader has gone: the server has what it wants, or has decided it wants none of
+                // it. Either way that is the *response's* story to tell, not an error of ours — and
+                // treating it as one turned a successful upload into "the upload stream closed early".
+                guard written > 0 else { return }
                 remaining = remaining.dropFirst(written)
             }
         }

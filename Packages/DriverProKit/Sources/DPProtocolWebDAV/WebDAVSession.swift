@@ -314,8 +314,10 @@ public actor WebDAVSession: Session {
     /// - Parameters:
     ///   - path: Where to write.
     ///   - contents: The bytes.
-    ///   - size: How many, when known. Sent as `Content-Length`; without it URLSession falls back to
-    ///     chunked transfer encoding, which some servers and reverse proxies refuse.
+    ///   - size: How many, when known. Sent as `Content-Length`, which a test confirms reaches the
+    ///     request rather than being stripped. Whether the *wire* then carries a length or chunked
+    ///     transfer encoding is the URL loading system's decision and is not observable from here — so
+    ///     if a server ever answers 411, that is the thing to go and measure.
     ///   - offset: Must be zero.
     /// - Throws: ``SessionError/unsupported(_:operation:)`` for a non-zero offset — there is no standard
     ///   resumable `PUT`, and starting from zero while pretending to resume would corrupt the file.

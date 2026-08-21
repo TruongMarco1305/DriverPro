@@ -84,24 +84,32 @@ final class WebDAVDownload: WebDAVConnectionDelegate, URLSessionDataDelegate {
 
         task.resume()
 
-        return AsyncThrowingStream { continuation in
-            let pump = Task {
+        // `unfolding`, not the `continuation` form, and the difference is the whole point of
+        // ``ChunkBuffer``. A stream built with a continuation buffers **without bound** by default, so a
+        // task looping `buffer.next()` into it would drain the buffer as fast as the network filled it,
+        // the high-water mark would never be reached, the download would never be suspended, and an
+        // entire file would end up in memory. Pulling one chunk per request from the consumer is what
+        // lets the marks control the network as they were designed to.
+        return AsyncThrowingStream {
+            // Cancellation is handled here rather than through an `onCancel:` parameter, which the
+            // throwing stream does not offer. Cancelling the URLSession task is what unsticks a consumer
+            // waiting on an empty buffer: the delegate is told the task ended, finishes the buffer, and
+            // the waiter resumes.
+            try await withTaskCancellationHandler {
                 do {
-                    while let chunk = try await buffer.next() {
-                        continuation.yield(chunk)
+                    guard let chunk = try await buffer.next() else {
+                        session.finishTasksAndInvalidate()
+                        return nil
                     }
-                    continuation.finish()
+                    return chunk
                 } catch {
-                    continuation.finish(throwing: error)
+                    session.finishTasksAndInvalidate()
+                    throw error
                 }
-                session.finishTasksAndInvalidate()
-            }
-
-            // Abandoning the stream — a cancelled transfer, a closed window — stops the download rather
-            // than leaving it running to fill a buffer nobody is reading.
-            continuation.onTermination = { _ in
+            } onCancel: {
+                // Abandoning the stream — a cancelled transfer, a closed window — stops the download
+                // rather than leaving it running to fill a buffer nobody is reading.
                 task.cancel()
-                pump.cancel()
                 session.invalidateAndCancel()
             }
         }

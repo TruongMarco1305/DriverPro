@@ -349,6 +349,40 @@ struct WebDAVSessionTests {
         #expect(StubURLProtocol.requests.last?.headers["Range"] == "bytes=6-")
     }
 
+    @Test("A server that rejects an upload before reading it is reported, not waited for", .timeLimit(.minutes(1)))
+    func writeReportsAnEarlyRejection() async throws {
+        // A server may answer before the body has been sent — a 401, a 403, a 507, or a proxy refusing
+        // the encoding. That is what a strict server does rather than swallow a gigabyte it means to
+        // reject, and the answer is the only thing that says what went wrong.
+        //
+        // Before the fix this hung: the response arrived, and the code then waited for a body pump
+        // writing into a stream nobody was reading any more.
+        let session = try await connected(then: [.init(status: 401)])
+
+        // The server's reason, not a transport error about a stream: a 401 has to reach the user as
+        // "the password was refused", or the retry that would fix it never happens.
+        await #expect(throws: SessionError.authenticationFailed(
+            reason: "The server rejected the user name or password."
+        )) {
+            try await session.write(RemotePath("/srv/big.bin"),
+                                    contents: SessionContract.stream(Data(repeating: 0, count: 2_000_000),
+                                                                     chunkSize: 16_384),
+                                    size: 2_000_000, resumingAt: 0)
+        }
+    }
+
+    @Test("An upload the server accepts without draining still succeeds", .timeLimit(.minutes(1)))
+    func writeSucceedsWhenTheServerStopsReading() async throws {
+        // The other half of the same mistake: a pump error must not fail an upload the server accepted.
+        // A server that has what it needs may stop reading, which makes the pump report a closed stream.
+        let session = try await connected(then: [.init(status: 201)])
+
+        try await session.write(RemotePath("/srv/big.bin"),
+                                contents: SessionContract.stream(Data(repeating: 0, count: 2_000_000),
+                                                                 chunkSize: 16_384),
+                                size: 2_000_000, resumingAt: 0)
+    }
+
     @Test("An upload sends a PUT with the size it was given")
     func writeShape() async throws {
         // Without `Content-Length`, URLSession falls back to chunked transfer encoding, which some
@@ -363,6 +397,11 @@ struct WebDAVSessionTests {
         let request = try #require(StubURLProtocol.requests.last)
         #expect(request.method == "PUT")
         #expect(request.body == payload, "every chunk reaches the wire, in order")
+
+        // `Content-Length` is a header URLSession reserves the right to manage, so this checks it is
+        // still there once URLSession has handed the request over. What it cannot check is which
+        // encoding the socket then uses — that is not observable from a URLProtocol.
+        #expect(request.headers["Content-Length"] == String(payload.count))
     }
 
     @Test("An upload asked to resume refuses rather than starting over quietly")
