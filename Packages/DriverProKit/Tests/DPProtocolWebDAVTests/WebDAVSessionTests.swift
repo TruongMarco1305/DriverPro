@@ -497,6 +497,69 @@ struct WebDAVSessionTests {
         #expect(hardened.httpCookieStorage == nil)
     }
 
+    // MARK: - Redirects behind a TLS terminator
+
+    @Test("A redirect that drops https for the same host and port keeps https")
+    func schemeDowngradeIsRepaired() {
+        // Apache behind Caddy answers `https://host:8443/folder` with
+        // `Location: http://host:8443/folder/` — its own scheme, because it does not know TLS was ever
+        // involved. That port speaks TLS only, so following it verbatim hangs up the connection and the
+        // user is told the network was lost. Reported against the plain WebDAV server's TLS front.
+        let original = URL(string: "https://cloud.example.com:8443/folder")!
+        let redirect = URLRequest(url: URL(string: "http://cloud.example.com:8443/folder/")!)
+
+        let repaired = WebDAVConnectionDelegate.keepingOurScheme(redirect, from: original)
+
+        #expect(repaired.url?.absoluteString == "https://cloud.example.com:8443/folder/")
+    }
+
+    @Test("The repair works on default ports too, where neither URL states one")
+    func schemeDowngradeIsRepairedOnDefaultPorts() {
+        let original = URL(string: "https://cloud.example.com/folder")!
+        let redirect = URLRequest(url: URL(string: "http://cloud.example.com/folder/")!)
+
+        let repaired = WebDAVConnectionDelegate.keepingOurScheme(redirect, from: original)
+
+        #expect(repaired.url?.absoluteString == "https://cloud.example.com/folder/")
+    }
+
+    @Test("A redirect to another host is left alone, downgrade or not")
+    func otherHostsAreNotRewritten() {
+        // The rewrite must never be able to send us somewhere new — only to keep the scheme we already
+        // had. Somewhere new is exactly the case URLSession's own caution is for.
+        let original = URL(string: "https://cloud.example.com/folder")!
+        let elsewhere = URLRequest(url: URL(string: "http://attacker.example.net/folder/")!)
+
+        let untouched = WebDAVConnectionDelegate.keepingOurScheme(elsewhere, from: original)
+
+        #expect(untouched.url?.absoluteString == "http://attacker.example.net/folder/")
+    }
+
+    @Test("A plain http session is never silently upgraded")
+    func plainHTTPIsNotUpgraded() {
+        // Only a *downgrade* is repaired. A session that started on http stays there — upgrading it
+        // would fail against a server with no TLS at all, which is the one the tests use.
+        let original = URL(string: "http://localhost:8081/folder")!
+        let redirect = URLRequest(url: URL(string: "http://localhost:8081/folder/")!)
+
+        let untouched = WebDAVConnectionDelegate.keepingOurScheme(redirect, from: original)
+
+        #expect(untouched.url?.absoluteString == "http://localhost:8081/folder/")
+    }
+
+    @Test("Credentials follow a redirect only when it is the same origin")
+    func credentialsDoNotCrossOrigins() {
+        let origin = URL(string: "https://cloud.example.com:8443/a")!
+
+        #expect(WebDAVConnectionDelegate.isSameOrigin(origin, URL(string: "https://cloud.example.com:8443/b")))
+        #expect(!WebDAVConnectionDelegate.isSameOrigin(origin, URL(string: "https://other.example.com:8443/b")))
+        #expect(!WebDAVConnectionDelegate.isSameOrigin(origin, URL(string: "https://cloud.example.com:9999/b")))
+        // The scheme counts: WebDAV authenticates with Basic, so following https onto http with the
+        // header attached would put the password on the wire in near-clear.
+        #expect(!WebDAVConnectionDelegate.isSameOrigin(origin, URL(string: "http://cloud.example.com:8443/b")))
+        #expect(!WebDAVConnectionDelegate.isSameOrigin(origin, nil))
+    }
+
     @Test("Hardening copies rather than modifies, so an injected stub survives it")
     func hardeningCopiesTheConfiguration() {
         let original = URLSessionConfiguration.ephemeral

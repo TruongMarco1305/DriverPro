@@ -81,6 +81,51 @@ struct WebDAVTrustIntegrationTests {
         try #require(WebDAVSession(host: makeHost(), trustedCertificates: store))
     }
 
+    // MARK: - Operating through the terminator
+
+    @Test("A folder deletes through a terminator that redirects to http")
+    func deletesACollectionBehindATLSTerminator() async throws {
+        // The regression test for a bug reported from the app: browsing worked and deleting a folder
+        // failed with "the network connection was lost".
+        //
+        // Apache answers a collection requested without a trailing slash with a 301, and behind Caddy it
+        // builds that redirect from its *own* scheme — `http://localhost:8443/folder/`, a plaintext URL
+        // on a port that speaks only TLS. Following it verbatim gets the connection hung up.
+        //
+        // Every collection operation that omits the slash is affected — `stat`, `exists`, `delete`,
+        // `move` — but not `list`, which passes `isDirectory: true`. Hence the shape of the report.
+        // This runs over TLS deliberately: the same code passes over plain HTTP, where the redirect is
+        // followable and nothing looks wrong.
+        let (store, url) = makeStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let session = try makeSession(store: store)
+        try await session.connect(credentials: nil, delegate: CountingTrustDelegate(answer: .acceptOnce))
+        defer { Task { await session.disconnect() } }
+
+        let folder = RemotePath("/tls-delete-\(UUID().uuidString.prefix(8))")
+        try await session.createDirectory(folder)
+        try await session.write(
+            folder.appending("inside.txt"),
+            contents: bytes(Data("hello".utf8)),
+            size: 5,
+            resumingAt: 0
+        )
+
+        // Each of these would have failed before the redirect repair, and for the same reason.
+        #expect(try await session.exists(folder), "stat of a collection redirects too")
+        try await session.delete(folder)
+        #expect(!(try await session.exists(folder)), "and it is really gone, with its contents")
+    }
+
+    /// One chunk, as `Session.write` wants it.
+    private func bytes(_ data: Data) -> AsyncThrowingStream<Data, any Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(data)
+            continuation.finish()
+        }
+    }
+
     // MARK: - Asking
 
     @Test("An untrusted certificate raises the question rather than failing")

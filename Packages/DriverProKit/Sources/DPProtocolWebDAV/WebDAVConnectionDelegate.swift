@@ -29,6 +29,11 @@ import Security
 /// Avoiding the redirect instead would mean knowing whether every path is a collection before asking
 /// about it, which costs a round trip per operation to save one that only happens sometimes.
 ///
+/// ## The second thing that goes wrong with the same redirect
+/// Behind a TLS terminator the redirect does not merely lose its credentials — it points at the wrong
+/// scheme, because the origin server does not know TLS was ever involved. ``keepingOurScheme(_:from:)``
+/// repairs that before any of the above is decided, and explains why it is safe to.
+///
 /// # Trusting a certificate the system will not
 ///
 /// The system evaluates the certificate first, and when it is satisfied nobody is asked anything. When
@@ -136,22 +141,68 @@ class WebDAVConnectionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sen
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        guard let authorization,
-              let original = task.originalRequest?.url,
-              Self.isSameOrigin(original, request.url) else {
+        guard let original = task.originalRequest?.url else {
             completionHandler(request)
             return
         }
 
-        var authenticated = request
+        let next = Self.keepingOurScheme(request, from: original)
+
+        guard let authorization, Self.isSameOrigin(original, next.url) else {
+            completionHandler(next)
+            return
+        }
+
+        var authenticated = next
         authenticated.setValue(authorization, forHTTPHeaderField: "Authorization")
         completionHandler(authenticated)
+    }
+
+    /// Puts `https` back when the server redirects us to `http` on the same host and port.
+    ///
+    /// ## The problem
+    /// A WebDAV server behind a TLS terminator — Caddy, nginx, a load balancer — usually does not know
+    /// it is behind one. Apache builds its trailing-slash redirect from *its own* scheme, so a request
+    /// to `https://host:8443/folder` is answered with `Location: http://host:8443/folder/`. That port
+    /// speaks TLS only, so following it sends plaintext to a TLS listener and the proxy hangs up. The
+    /// error reaching the user is `NSURLErrorNetworkConnectionLost` — "the network connection was
+    /// lost" — which says nothing about a redirect and points at the network rather than the server.
+    ///
+    /// It disables every collection operation that does not end its URL in a slash: `stat`, `exists`,
+    /// `delete` and `move`. Not `list`, which passes `isDirectory: true` — which is why the symptom is
+    /// the baffling one of browsing working perfectly and deleting a folder failing.
+    ///
+    /// ## Why repairing it is safe
+    /// The rewrite only ever keeps the *more* secure scheme, and only when the host and port are
+    /// unchanged — so it cannot send us somewhere new, and it cannot downgrade. A redirect that
+    /// genuinely changes host is left alone for `URLSession` to handle, credentials stripped.
+    ///
+    /// - Parameters:
+    ///   - request: The redirect `URLSession` proposes to follow.
+    ///   - original: Where the request that was redirected went.
+    /// - Returns: The request, with `https` restored if it had been dropped.
+    static func keepingOurScheme(_ request: URLRequest, from original: URL) -> URLRequest {
+        guard original.scheme?.lowercased() == "https",
+              let target = request.url,
+              target.scheme?.lowercased() == "http",
+              target.host()?.lowercased() == original.host()?.lowercased(),
+              target.port == original.port,
+              var components = URLComponents(url: target, resolvingAgainstBaseURL: false)
+        else { return request }
+
+        components.scheme = "https"
+        guard let secure = components.url else { return request }
+
+        var repaired = request
+        repaired.url = secure
+        return repaired
     }
 
     /// Whether two URLs are the same server, by scheme, host and port.
     ///
     /// Compared rather than assumed: a redirect to another host is exactly the case where the
-    /// credentials must not follow.
+    /// credentials must not follow. The scheme counts too — credentials that follow an `https` request
+    /// onto plain `http` are credentials put on the wire in near-clear, and WebDAV's are Basic.
     static func isSameOrigin(_ one: URL, _ other: URL?) -> Bool {
         guard let other else { return false }
         return one.scheme == other.scheme
