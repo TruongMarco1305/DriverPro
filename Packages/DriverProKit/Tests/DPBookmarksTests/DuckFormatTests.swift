@@ -337,6 +337,49 @@ struct DuckEncodingTests {
         #expect(try encoded(host)["Protocol"] as? String == "davs")
     }
 
+    // MARK: - One path in the file, two in the bookmark
+
+    @Test("A WebDAV bookmark exports its DAV root as Path")
+    func webdavExportsTheDavRootAsPath() throws {
+        // Cyberduck has one path where DriverPro has two. `Path` carries the DAV root because it is the
+        // half without which nothing resolves — and because a Nextcloud bookmark Cyberduck exported has
+        // its DAV root there, so reading and writing agree.
+        let host = RemoteHost(
+            protocolIdentifier: .webdav, hostname: "cloud.example.com", port: 443, username: "duck",
+            defaultPath: RemotePath("/Photos"),
+            properties: [RemoteHost.webdavBasePathKey: "/remote.php/dav/files/duck"]
+        )
+
+        let dictionary = try encoded(host)
+
+        #expect(dictionary["Path"] as? String == "/remote.php/dav/files/duck")
+        #expect(dictionary["DriverPro Default Path"] as? String == "/Photos",
+                "the folder to open goes somewhere Cyberduck will ignore rather than being dropped")
+    }
+
+    @Test("A WebDAV bookmark with no DAV root exports no Path at all")
+    func webdavWithoutADavRootWritesNoPath() throws {
+        // A plain server at the root is the ordinary case, and an empty string is not the same as a
+        // missing key — Cyberduck treats them differently, which is why `setOrRemove` exists.
+        let host = RemoteHost(protocolIdentifier: .webdav, hostname: "dav.example.com", port: 443)
+
+        #expect(try encoded(host)["Path"] == nil)
+    }
+
+    @Test("SFTP's Path still means the folder to open")
+    func sftpPathIsUnchanged() throws {
+        // The WebDAV rule must not leak into the protocol that had this right already.
+        let host = RemoteHost(
+            protocolIdentifier: .sftp, hostname: "example.com", port: 22,
+            defaultPath: RemotePath("/srv/www")
+        )
+
+        let dictionary = try encoded(host)
+
+        #expect(dictionary["Path"] as? String == "/srv/www")
+        #expect(dictionary["DriverPro Default Path"] == nil, "one path is all SFTP has")
+    }
+
     @Test("The file is named the way Cyberduck names its own")
     func fileNaming() {
         let host = RemoteHost(protocolIdentifier: .sftp, hostname: "example.com", port: 22,
@@ -352,6 +395,48 @@ struct DuckEncodingTests {
 
 @Suite("DuckFormat — round trip")
 struct DuckRoundTripTests {
+
+    // MARK: - One path in the file, two in the bookmark
+
+    @Test("A Nextcloud bookmark from Cyberduck imports with its DAV root, not a default path")
+    func cyberduckWebdavPathIsTheDavRoot() throws {
+        // What a real Cyberduck Nextcloud bookmark looks like: one Path, and it holds the DAV root.
+        // Read as a default path — which is what DriverPro did before — the bookmark connects to the
+        // server root and finds nothing.
+        let file = DuckFixture.plist("""
+            <key>Protocol</key><string>davs</string>
+            <key>Hostname</key><string>cloud.example.com</string>
+            <key>Port</key><string>443</string>
+            <key>Username</key><string>duck</string>
+            <key>Path</key><string>/remote.php/dav/files/duck</string>
+            """)
+
+        guard case .bookmark(let host) = DuckFormat.decode(file, supported: [.sftp, .webdav]) else {
+            Issue.record("fixture did not decode")
+            return
+        }
+
+        #expect(host.properties[RemoteHost.webdavBasePathKey] == "/remote.php/dav/files/duck")
+        #expect(host.defaultPath == nil, "Cyberduck's Path is the root, not a folder inside it")
+    }
+
+    @Test("A WebDAV bookmark survives a round trip with both its paths")
+    func webdavPathsRoundTrip() throws {
+        let original = RemoteHost(
+            protocolIdentifier: .webdav, hostname: "cloud.example.com", port: 443, username: "duck",
+            defaultPath: RemotePath("/Photos"),
+            properties: [RemoteHost.webdavBasePathKey: "/remote.php/dav/files/duck"]
+        )
+
+        guard case .bookmark(let returned) = DuckFormat.decode(try DuckFormat.encode(original),
+                                                               supported: [.sftp, .webdav]) else {
+            Issue.record("the file we wrote did not decode")
+            return
+        }
+
+        #expect(returned.properties[RemoteHost.webdavBasePathKey] == "/remote.php/dav/files/duck")
+        #expect(returned.defaultPath == RemotePath("/Photos"))
+    }
 
     @Test("Settings DriverPro has no field for survive a round trip")
     func preservesUnmappedKeys() throws {

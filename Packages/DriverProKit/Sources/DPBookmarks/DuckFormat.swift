@@ -47,8 +47,50 @@ public enum DuckFormat {
     /// file — so the whole dictionary is preserved and only its `Path` is overwritten on the way out.
     /// Mapping it would silently strip that alias and break the key for them.
     private static let mappedKeys: Set<String> = [
-        "Protocol", "Hostname", "Port", "Username", "Path", "Nickname", "UUID", "Comment"
+        "Protocol", "Hostname", "Port", "Username", "Path", "Nickname", "UUID", "Comment",
+        driverProDefaultPathKey
     ]
+
+    /// Where a WebDAV bookmark's *browsing* start point goes, since `Path` is carrying its DAV root.
+    ///
+    /// Cyberduck has one path where DriverPro has two, so an export has to choose which one `Path`
+    /// holds — see ``paths(in:for:)``. This carries the other, so a DriverPro-to-DriverPro round trip
+    /// loses nothing. Cyberduck ignores keys it does not know, so writing it costs them nothing.
+    static let driverProDefaultPathKey = "DriverPro Default Path"
+
+    /// Reads the one or two paths a bookmark has, according to what its protocol means by `Path`.
+    ///
+    /// **The mapping problem.** Cyberduck models a bookmark as a URL, so `Path` is simply where
+    /// browsing begins. DriverPro splits that in two for WebDAV: ``RemoteHost/webdavBasePathKey`` is the
+    /// DAV root — the prefix every request is built on, `/remote.php/dav/files/duck` for Nextcloud — and
+    /// `defaultPath` is the folder to open inside it. Cyberduck has nowhere to put the second.
+    ///
+    /// **So `Path` carries the DAV root**, because it is the half without which the bookmark does not
+    /// work at all: lose the default path and you start at the account root, lose the DAV root and
+    /// nothing resolves. It also means a Nextcloud bookmark exported from Cyberduck — whose `Path` *is*
+    /// its DAV root — imports correctly, which is the whole point of reading someone else's format.
+    ///
+    /// Every other protocol is unchanged: `Path` is the default path, as it always was.
+    ///
+    /// - Parameters:
+    ///   - dictionary: The bookmark as read from the file.
+    ///   - protocolIdentifier: What the bookmark speaks, which decides what `Path` means.
+    /// - Returns: The default path, and any properties the paths imply.
+    private static func paths(
+        in dictionary: [String: Any],
+        for protocolIdentifier: ProtocolIdentifier
+    ) -> (defaultPath: RemotePath?, properties: [String: String]) {
+        let path = nonEmpty(dictionary["Path"])
+
+        guard protocolIdentifier == .webdav else {
+            return (path.map { RemotePath($0) }, [:])
+        }
+
+        var properties: [String: String] = [:]
+        if let path { properties[RemoteHost.webdavBasePathKey] = path }
+        let ours = nonEmpty(dictionary[driverProDefaultPathKey]).map { RemotePath($0) }
+        return (ours, properties)
+    }
 
     // MARK: - Protocol identifiers
 
@@ -113,16 +155,18 @@ public enum DuckFormat {
         // of the bookmark is still worth having, and a wrong port is visible and fixable.
         let port = (dictionary["Port"] as? String).flatMap(Int.init) ?? defaultPort
 
+        let (defaultPath, extraProperties) = paths(in: dictionary, for: protocolIdentifier)
+
         var host = RemoteHost(
             id: (dictionary["UUID"] as? String).flatMap(UUID.init) ?? UUID(),
             protocolIdentifier: protocolIdentifier,
             hostname: hostname,
             port: port,
             username: nonEmpty(dictionary["Username"]),
-            defaultPath: nonEmpty(dictionary["Path"]).map { RemotePath($0) },
+            defaultPath: defaultPath,
             nickname: nonEmpty(dictionary["Nickname"]),
             comment: nonEmpty(dictionary["Comment"]),
-            properties: preserved(from: dictionary)
+            properties: preserved(from: dictionary).merging(extraProperties) { _, new in new }
         )
 
         // A bookmark naming a key file means "log in with this key", so both halves of the preference
@@ -170,9 +214,17 @@ public enum DuckFormat {
         // Set only when there is something to set: Cyberduck treats a missing key and an empty string
         // differently, and an empty Nickname shows as a blank row in its sidebar.
         setOrRemove(&dictionary, "Username", host.username)
-        setOrRemove(&dictionary, "Path", host.defaultPath?.pathString)
         setOrRemove(&dictionary, "Nickname", host.nickname)
         setOrRemove(&dictionary, "Comment", host.comment)
+
+        // Which path goes in `Path` depends on the protocol; see `paths(in:for:)` for why WebDAV's is
+        // its DAV root rather than its default path.
+        if host.protocolIdentifier == .webdav {
+            setOrRemove(&dictionary, "Path", host.properties[RemoteHost.webdavBasePathKey])
+            setOrRemove(&dictionary, driverProDefaultPathKey, host.defaultPath?.pathString)
+        } else {
+            setOrRemove(&dictionary, "Path", host.defaultPath?.pathString)
+        }
 
         // Written in the form Cyberduck writes, with the home directory abbreviated as it does. The
         // legacy key goes too: older Cyberduck builds read only that one.
