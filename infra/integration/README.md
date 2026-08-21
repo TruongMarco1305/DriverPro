@@ -25,7 +25,7 @@ down again — including if the tests fail or you interrupt it. Requires Docker.
 
 ## Adding a service
 
-M3 (WebDAV) and M4 (S3) each need one. Add a service to `docker-compose.yml` and its settings to
+M4 (S3) needs one; M3's WebDAV is already here. Add a service to `docker-compose.yml` and its settings to
 `.env`, then gate the new suite behind its own `<SERVICE>_HOST` so the offline default stays offline.
 **`script.sh` does not change** — it starts whatever compose defines, rather than growing a
 subcommand or an argument per protocol.

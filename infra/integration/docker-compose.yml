@@ -18,3 +18,22 @@ services:
       timeout: 3s
       retries: 30
       start_period: 2s
+
+  webdav:
+    image: bytemark/webdav:2.4
+    container_name: integration-webdav
+    platform: linux/amd64
+    ports:
+      - "${WEBDAV_PORT}:80"
+    environment:
+      AUTH_TYPE: Basic
+      USERNAME: ${WEBDAV_USER}
+      PASSWORD: ${WEBDAV_PASSWORD}
+    healthcheck:
+      # An unauthenticated request answers 401, which is proof enough that Apache is listening and the
+      # DAV module is loaded — a 200 would mean authentication was not configured.
+      test: ["CMD", "sh", "-c", "wget -q -S -O /dev/null http://localhost/ 2>&1 | grep -q '401'"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
