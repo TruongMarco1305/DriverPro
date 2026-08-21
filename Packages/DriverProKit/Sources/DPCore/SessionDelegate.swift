@@ -66,6 +66,125 @@ public enum HostKeyDecision: Hashable, Sendable {
     case acceptAndStore
 }
 
+// MARK: - Certificate prompting
+
+/// A TLS certificate the system will not vouch for, offered to the user to judge.
+///
+/// The same question as ``HostKeyChallenge``, for the same reason: *this server is not vouched for by
+/// anyone; do you know it?* The shape is deliberately identical — unknown or changed, reject or accept
+/// or accept-and-remember — so a user who has answered one recognises the other.
+///
+/// It carries two things a host key does not need. **Why** the system refused it, because "untrusted
+/// certificate" tells nobody anything they can act on while "expired three days ago" tells them to renew
+/// it; and who issued it and to whom, so the sheet shows what is being trusted rather than only a
+/// fingerprint.
+public struct CertificateChallenge: Hashable, Sendable {
+
+    /// What is already known about this server's certificate.
+    public enum Trust: Hashable, Sendable {
+        /// Never seen before. Normal for a self-hosted server: the user confirms it once and it is
+        /// remembered. Trust on first use, exactly as for a host key.
+        case unknown
+
+        /// A different certificate was accepted for this host before.
+        ///
+        /// The serious one. Either the server's certificate was legitimately renewed — which happens
+        /// routinely, and is why this cannot simply refuse — or something is impersonating it. The UI
+        /// must show both fingerprints and must never default to Accept.
+        case changed(previousFingerprint: String)
+    }
+
+    /// Why the system would not accept the certificate.
+    ///
+    /// Several can be true at once — a self-signed certificate that also expired — so this is reported
+    /// as a set rather than a single cause.
+    public enum Problem: Hashable, Sendable, CaseIterable {
+        /// Signed by itself rather than by an authority. The ordinary case for a server someone runs.
+        case selfSigned
+        /// Signed by an authority this machine does not know.
+        case untrustedRoot
+        /// Its validity period has passed.
+        case expired
+        /// Its validity period has not started, which usually means a clock is wrong.
+        case notYetValid
+        /// It is for a different name than the one being connected to.
+        case hostnameMismatch
+
+        /// A sentence naming the problem, for the sheet.
+        public var explanation: String {
+            switch self {
+            case .selfSigned: "It is signed by itself rather than by a certificate authority."
+            case .untrustedRoot: "It was issued by an authority this Mac does not recognise."
+            case .expired: "It has expired."
+            case .notYetValid: "It is not valid yet, which usually means a clock is wrong."
+            case .hostnameMismatch: "It was issued for a different server name."
+            }
+        }
+    }
+
+    /// The server address, for display.
+    public var hostname: String
+    /// The port connected to.
+    public var port: Int
+    /// Who the certificate was issued to.
+    public var subject: String
+    /// Who issued it. The same as ``subject`` when it is self-signed.
+    public var issuer: String
+    /// The SHA-256 fingerprint, spelled `"SHA256:…"` as host keys are, so the two read alike and either
+    /// can be compared against what a command-line tool prints.
+    public var fingerprint: String
+    /// When it stops being valid, if that could be read.
+    public var expiresAt: Date?
+    /// Every reason the system refused it.
+    public var problems: Set<Problem>
+    /// Whether this certificate is unknown or has changed since it was accepted.
+    public var trust: Trust
+
+    /// Creates a certificate challenge.
+    ///
+    /// - Parameters:
+    ///   - hostname: The server address.
+    ///   - port: The port connected to.
+    ///   - subject: Who it was issued to.
+    ///   - issuer: Who issued it.
+    ///   - fingerprint: SHA-256 fingerprint, `"SHA256:…"`.
+    ///   - expiresAt: When it expires, if known.
+    ///   - problems: Why the system refused it.
+    ///   - trust: Whether it is unknown or changed.
+    public init(
+        hostname: String,
+        port: Int,
+        subject: String,
+        issuer: String,
+        fingerprint: String,
+        expiresAt: Date? = nil,
+        problems: Set<Problem> = [],
+        trust: Trust = .unknown
+    ) {
+        self.hostname = hostname
+        self.port = port
+        self.subject = subject
+        self.issuer = issuer
+        self.fingerprint = fingerprint
+        self.expiresAt = expiresAt
+        self.problems = problems
+        self.trust = trust
+    }
+}
+
+/// The user's answer to a ``CertificateChallenge``.
+public enum CertificateDecision: Hashable, Sendable {
+    /// Refuse the connection.
+    case reject
+    /// Proceed without recording it.
+    ///
+    /// Remembered for the lifetime of the connection but never written down — otherwise "just this once"
+    /// would mean "once per request", and a transfer that opens several would ask again and again.
+    case acceptOnce
+    /// Proceed, and remember it for next time.
+    case acceptAndStore
+}
+
 // MARK: - Credential prompting
 
 /// A request for credentials, made when none were stored or the stored ones were refused.
@@ -210,6 +329,21 @@ public protocol SessionDelegate: Sendable {
         needsKeyboardInteractiveResponses prompts: [(prompt: String, isEchoed: Bool)]
     ) async -> [String]?
 
+    /// Asks whether to trust a server's TLS certificate.
+    ///
+    /// Called only when the system has already refused it and nothing on record settles the matter — the
+    /// same division of labour as host keys, where the protocol layer consults `known_hosts` first and
+    /// asks only about what it cannot decide.
+    ///
+    /// - Parameters:
+    ///   - host: The connection being established.
+    ///   - challenge: The certificate being offered, why it was refused, and what is known about it.
+    /// - Returns: Whether to reject, accept once, or accept and remember.
+    func session(
+        _ host: RemoteHost,
+        needsCertificateVerification challenge: CertificateChallenge
+    ) async -> CertificateDecision
+
     /// Reports a line of protocol conversation.
     ///
     /// Called frequently and from arbitrary tasks, so implementations must be cheap and must not block.
@@ -235,6 +369,18 @@ extension SessionDelegate {
         needsKeyboardInteractiveResponses prompts: [(prompt: String, isEchoed: Bool)]
     ) async -> [String]? {
         nil
+    }
+
+    /// Refuses an untrusted certificate by default.
+    ///
+    /// The safe direction: a delegate that has not thought about certificates declines them rather than
+    /// guessing what the user would have said. Every existing conformer keeps compiling, and none of
+    /// them silently starts accepting.
+    public func session(
+        _ host: RemoteHost,
+        needsCertificateVerification challenge: CertificateChallenge
+    ) async -> CertificateDecision {
+        .reject
     }
 
     /// Discards transcript messages by default.

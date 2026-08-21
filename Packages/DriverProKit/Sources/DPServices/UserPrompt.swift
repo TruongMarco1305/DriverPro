@@ -26,6 +26,18 @@ public protocol UserPrompt: Sendable {
     /// - Returns: Whether to reject, accept once, or accept and remember.
     func askHostKey(_ challenge: HostKeyChallenge, for host: RemoteHost) async -> HostKeyDecision
 
+    /// Asks whether to trust a server's TLS certificate.
+    ///
+    /// Only called when the system has already refused it *and* nothing on record settles the matter —
+    /// the same rule as ``askHostKey(_:for:)``, and for the same reason: a prompt that appears when it
+    /// need not is a prompt people learn to dismiss.
+    ///
+    /// - Parameters:
+    ///   - challenge: The certificate being offered, why it was refused, and what is known about it.
+    ///   - host: The connection being established.
+    /// - Returns: Whether to reject, accept once, or accept and remember.
+    func askCertificate(_ challenge: CertificateChallenge, for host: RemoteHost) async -> CertificateDecision
+
     /// Asks for credentials.
     ///
     /// - Parameter request: Why credentials are needed, and for which connection.
@@ -45,6 +57,18 @@ public protocol UserPrompt: Sendable {
 }
 
 extension UserPrompt {
+    /// Refuses an untrusted certificate by default.
+    ///
+    /// The safe answer, and the same one ``SessionDelegate`` defaults to: a prompt that has not been
+    /// taught about certificates declines them rather than guessing. Every existing conformer — the test
+    /// doubles especially — keeps working, and none of them silently starts accepting.
+    public func askCertificate(
+        _ challenge: CertificateChallenge,
+        for host: RemoteHost
+    ) async -> CertificateDecision {
+        .reject
+    }
+
     /// Declines keyboard-interactive authentication by default, so adopting the protocol needs two
     /// methods rather than three.
     public func askKeyboardInteractive(

@@ -96,12 +96,12 @@ let package = Package(
         // composition root.
         .target(
             name: "DPProtocolWebDAV",
-            dependencies: ["DPCore"],
+            dependencies: ["DPCore", "DPCredentials"],
             swiftSettings: swiftSettings
         ),
         .testTarget(
             name: "DPProtocolWebDAVTests",
-            dependencies: ["DPProtocolWebDAV", "DPCore", "DPTestSupport"],
+            dependencies: ["DPProtocolWebDAV", "DPCore", "DPCredentials", "DPTestSupport"],
             swiftSettings: swiftSettings
         ),
 

@@ -37,13 +37,15 @@ enum WebDAVUpload {
     ///   - path: What is being written, for the error if it fails.
     ///   - configuration: The session configuration to run on.
     ///   - authorization: The credentials, so a redirect within the server does not lose them.
+    ///   - trust: Who decides about a certificate the system refused.
     /// - Throws: ``SessionError`` if the upload fails or the server refuses it.
     static func send(
         _ request: URLRequest,
         contents: AsyncThrowingStream<Data, any Error>,
         path: RemotePath,
         configuration: URLSessionConfiguration,
-        authorization: String?
+        authorization: String?,
+        trust: TrustDecider?
     ) async throws {
         var input: InputStream?
         var output: OutputStream?
@@ -58,7 +60,7 @@ enum WebDAVUpload {
 
         let session = URLSession(
             configuration: configuration,
-            delegate: WebDAVRedirectAuthenticator(authorization: authorization),
+            delegate: WebDAVConnectionDelegate(authorization: authorization, trust: trust),
             delegateQueue: nil
         )
         defer { session.finishTasksAndInvalidate() }

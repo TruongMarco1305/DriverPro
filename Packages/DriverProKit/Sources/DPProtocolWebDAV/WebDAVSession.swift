@@ -4,6 +4,7 @@
 //
 
 import DPCore
+import DPCredentials
 import Foundation
 
 /// A connection to a WebDAV server.
@@ -33,12 +34,17 @@ public actor WebDAVSession: Session {
     public nonisolated let host: RemoteHost
 
     private let paths: WebDAVPaths
+    /// What the user has already accepted, consulted before anyone is asked again.
+    private let trustedCertificates: TrustedCertificateStore
     /// Kept because every request path needs a session of its own: the transport's carries the redirect
     /// delegate, and a download or an upload needs one it can attach its own delegate or body stream to.
     private let configuration: URLSessionConfiguration
 
     private var transport: WebDAVTransport?
     private var delegate: (any SessionDelegate)?
+    /// Built at connect time, because it needs the delegate to ask. Lives as long as the session, which
+    /// is what makes "accept once" mean once per *connection* rather than once per request.
+    private var trustDecider: TrustDecider?
 
     /// What this backend can do, which is a genuinely different set from SFTP's.
     ///
@@ -55,9 +61,14 @@ public actor WebDAVSession: Session {
     ///
     /// - Parameters:
     ///   - host: Where to connect, and the settings that shape it.
+    ///   - trustedCertificates: Certificates the user has already accepted. Defaults to the shared file.
     ///   - configuration: The `URLSession` configuration. Injected so a test can install a stub.
     /// - Returns: `nil` if the bookmark does not describe a reachable URL.
-    public init?(host: RemoteHost, configuration: URLSessionConfiguration = .ephemeral) {
+    public init?(
+        host: RemoteHost,
+        trustedCertificates: TrustedCertificateStore = TrustedCertificateStore(),
+        configuration: URLSessionConfiguration = .ephemeral
+    ) {
         let isSecure = host.properties[Self.allowsInsecureKey] != "true"
         guard let paths = WebDAVPaths(
             host: host,
@@ -67,6 +78,7 @@ public actor WebDAVSession: Session {
 
         self.host = host
         self.paths = paths
+        self.trustedCertificates = trustedCertificates
         self.configuration = configuration
     }
 
@@ -95,8 +107,14 @@ public actor WebDAVSession: Session {
             throw SessionError.authenticationFailed(reason: "WebDAV needs a user name and password.")
         }
 
+        // Built before the first request, so even the probe below can raise the certificate question —
+        // finding out at connect time is what lets the sheet appear while the user is still connecting.
+        let decider = TrustDecider(host: host, store: trustedCertificates, delegate: delegate)
+        self.trustDecider = decider
+
         let transport = WebDAVTransport(
-            configuration: configuration, username: supplied.username, password: password
+            configuration: configuration, username: supplied.username, password: password,
+            trust: decider
         )
         // Depth 0: this asks only about the root itself. Depth 1 would list the whole top directory
         // before anyone had asked to see it.
@@ -121,6 +139,8 @@ public actor WebDAVSession: Session {
         transport?.invalidate()
         transport = nil
         delegate = nil
+        // With it goes every "accept once" answer, which is what makes them last exactly one connection.
+        trustDecider = nil
     }
 
     // MARK: - Browsing
@@ -284,7 +304,7 @@ public actor WebDAVSession: Session {
         }
         return WebDAVDownload.stream(
             request, path: path, expectsRange: offset > 0,
-            configuration: configuration, authorization: transport.credentials
+            configuration: configuration, authorization: transport.credentials, trust: trustDecider
         )
     }
 
@@ -317,7 +337,7 @@ public actor WebDAVSession: Session {
 
         try await WebDAVUpload.send(
             request, contents: contents, path: path,
-            configuration: configuration, authorization: transport.credentials
+            configuration: configuration, authorization: transport.credentials, trust: trustDecider
         )
     }
 

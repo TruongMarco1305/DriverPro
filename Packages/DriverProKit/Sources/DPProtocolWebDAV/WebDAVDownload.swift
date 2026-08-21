@@ -18,7 +18,7 @@ import Foundation
 /// network down: `URLSessionTask.suspend()`.
 ///
 /// See `docs/swift-notes.md`, section 39.
-final class WebDAVDownload: WebDAVRedirectAuthenticator, URLSessionDataDelegate {
+final class WebDAVDownload: WebDAVConnectionDelegate, URLSessionDataDelegate {
 
     private let buffer: ChunkBuffer
     private let path: RemotePath
@@ -35,10 +35,15 @@ final class WebDAVDownload: WebDAVRedirectAuthenticator, URLSessionDataDelegate 
     /// is exactly the right length, which is the worst kind.
     private(set) var didResume = false
 
-    private init(buffer: ChunkBuffer, path: RemotePath, authorization: String?) {
+    private init(
+        buffer: ChunkBuffer,
+        path: RemotePath,
+        authorization: String?,
+        trust: TrustDecider?
+    ) {
         self.buffer = buffer
         self.path = path
-        super.init(authorization: authorization)
+        super.init(authorization: authorization, trust: trust)
     }
 
     /// Starts a download and returns its body as chunks.
@@ -50,16 +55,19 @@ final class WebDAVDownload: WebDAVRedirectAuthenticator, URLSessionDataDelegate 
     ///     server declining to honour it.
     ///   - configuration: The session configuration to run on.
     ///   - authorization: The credentials, so a redirect within the server does not lose them.
+    ///   - trust: Who decides about a certificate the system refused.
     /// - Returns: The chunks, in order.
     static func stream(
         _ request: URLRequest,
         path: RemotePath,
         expectsRange: Bool,
         configuration: URLSessionConfiguration,
-        authorization: String?
+        authorization: String?,
+        trust: TrustDecider?
     ) -> AsyncThrowingStream<Data, any Error> {
         let buffer = ChunkBuffer()
-        let downloader = WebDAVDownload(buffer: buffer, path: path, authorization: authorization)
+        let downloader = WebDAVDownload(buffer: buffer, path: path,
+                                        authorization: authorization, trust: trust)
         downloader.expectsRange = expectsRange
 
         // Its own session, because a delegate belongs to a session for that session's lifetime. It is

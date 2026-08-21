@@ -37,3 +37,30 @@ services:
       timeout: 3s
       retries: 30
       start_period: 2s
+
+  # TLS in front of the WebDAV server, with a certificate Caddy signs itself. Untrusted by construction,
+  # which is exactly the case slice 3c exists to handle: the servers WebDAV is actually run on — a
+  # Nextcloud in a cupboard, a NAS — very often look like this.
+  webdav-tls:
+    image: caddy:2-alpine
+    container_name: integration-webdav-tls
+    platform: linux/amd64
+    depends_on:
+      webdav:
+        condition: service_healthy
+    ports:
+      - "${WEBDAV_TLS_PORT}:443"
+    command: >
+      caddy reverse-proxy
+        --from https://localhost:443
+        --to http://webdav:80
+        --internal-certs
+    healthcheck:
+      # `--no-check-certificate` deliberately: the certificate is *meant* to be untrusted, so verifying
+      # it here would fail for the very reason this service exists. This checks only that TLS terminates
+      # and proxies through.
+      test: ["CMD", "sh", "-c", "wget -q --no-check-certificate -S -O /dev/null https://localhost/ 2>&1 | grep -q '401'"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s

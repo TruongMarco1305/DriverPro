@@ -29,6 +29,8 @@ public struct DriverProServices: Sendable {
     public let credentials: any CredentialStore
     /// Trusted SSH host keys.
     public let knownHosts: KnownHostsStore
+    /// Certificates the user has accepted that the system would not.
+    public let trustedCertificates: TrustedCertificateStore
     /// Which protocols exist, and how to build a session for one.
     public let catalog: ProtocolCatalog
     /// Lends connections, capped per host.
@@ -49,6 +51,7 @@ public struct DriverProServices: Sendable {
     ///   - database: An open database, migrated with ``BookmarkStore/migrations``.
     ///   - credentials: Where passwords are kept.
     ///   - knownHosts: Where SSH host keys are read and recorded.
+    ///   - trustedCertificates: Where accepted TLS certificates are recorded.
     ///   - prompt: How to reach the user.
     ///   - catalog: Supported protocols. Defaults to ``ProtocolCatalog/live``.
     ///   - sessionFactory: Overrides how sessions are built. Defaults to the catalog's own factory;
@@ -60,6 +63,7 @@ public struct DriverProServices: Sendable {
         database: Database,
         credentials: any CredentialStore,
         knownHosts: KnownHostsStore,
+        trustedCertificates: TrustedCertificateStore = TrustedCertificateStore(),
         prompt: any UserPrompt,
         catalog: ProtocolCatalog = .live,
         sessionFactory: (any SessionFactory)? = nil,
@@ -70,6 +74,7 @@ public struct DriverProServices: Sendable {
         self.database = database
         self.credentials = credentials
         self.knownHosts = knownHosts
+        self.trustedCertificates = trustedCertificates
         self.catalog = catalog
         self.bookmarks = BookmarkStore(database: database)
 
@@ -77,7 +82,9 @@ public struct DriverProServices: Sendable {
         self.coordinator = coordinator
 
         let pool = SessionPool(
-            factory: sessionFactory ?? catalog.makeSessionFactory(knownHosts: knownHosts),
+            factory: sessionFactory ?? catalog.makeSessionFactory(
+                knownHosts: knownHosts, trustedCertificates: trustedCertificates
+            ),
             delegate: coordinator,
             maxConnectionsPerHost: maxConnectionsPerHost
         )

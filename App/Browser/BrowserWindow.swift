@@ -48,6 +48,8 @@ struct BrowserWindow: View {
             switch question {
             case .hostKey(let challenge, let host):
                 HostKeySheet(challenge: challenge, host: host)
+            case .certificate(let challenge, let host):
+                CertificateSheet(challenge: challenge, host: host)
             case .credentials(let request):
                 CredentialSheet(request: request)
             }

@@ -1,0 +1,161 @@
+//
+//  WebDAVConnectionDelegate.swift
+//  DPProtocolWebDAV
+//
+
+import DPCore
+import Foundation
+import Security
+
+/// What every WebDAV session needs from a delegate: credentials that survive a redirect, and an answer
+/// when the system will not vouch for the server's certificate.
+///
+/// One type for both because every session in this backend needs both — the transport's, and the ones a
+/// download and an upload each build for themselves.
+///
+/// # Credentials across a redirect
+///
+/// ## The problem this solves
+/// Apache answers a *collection* requested without a trailing slash with a 301 to the slashed form —
+/// `DELETE /photos` becomes `DELETE /photos/`. `URLSession` follows the redirect automatically and
+/// **drops the `Authorization` header when it does**, so the second request arrives anonymous and the
+/// server answers 401. The symptom is baffling: browsing works, and deleting a folder reports the
+/// password is wrong.
+///
+/// Dropping the header is right of `URLSession` in general — following a redirect to another host with
+/// your credentials attached is how they leak. So this puts them back only when the redirect stays on
+/// the same scheme, host and port, and lets `URLSession`'s caution stand everywhere else.
+///
+/// Avoiding the redirect instead would mean knowing whether every path is a collection before asking
+/// about it, which costs a round trip per operation to save one that only happens sometimes.
+///
+/// # Trusting a certificate the system will not
+///
+/// The system evaluates the certificate first, and when it is satisfied nobody is asked anything. When
+/// it is not, ``TrustDecider`` is consulted — which checks what has been accepted before and only then
+/// puts the question to the user. The same division of labour as `HostKeyVerifier`, which is why
+/// `CredentialCoordinator` does no `known_hosts` lookup of its own.
+class WebDAVConnectionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+
+    /// The `Authorization` header value to re-attach, if there is one.
+    let authorization: String?
+
+    /// Who decides about a certificate the system refused. `nil` means refuse it.
+    let trust: TrustDecider?
+
+    /// Creates a delegate.
+    ///
+    /// - Parameters:
+    ///   - authorization: The header value, or `nil` for an anonymous server.
+    ///   - trust: Who to ask about an untrusted certificate.
+    init(authorization: String?, trust: TrustDecider? = nil) {
+        self.authorization = authorization
+        self.trust = trust
+    }
+
+    // MARK: - Server trust
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust,
+              let trust else {
+            // Anything else — Basic, Digest, a client certificate — is left to URLSession, which for a
+            // pre-emptively authenticated request means answering the 401 rather than retrying blindly.
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        // The system first. A certificate it accepts raises no question at all, which is the common case
+        // and must stay silent.
+        var error: CFError?
+        if SecTrustEvaluateWithError(serverTrust, &error) {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        // Everything that touches Security.framework happens here, synchronously, so only Swift values
+        // cross into the task below. `SecTrust` is a C type and not `Sendable`; reading it first is both
+        // what satisfies the compiler and the better shape — `TrustDecider` never sees a CF object.
+        guard let summary = CertificateDetails.summarise(serverTrust) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        let problems = CertificateDetails.problems(from: error as (any Error)?, summary: summary)
+
+        // The callback is synchronous and asking a person is not, so the answer is awaited in a task and
+        // delivered when it arrives. URLSession waits as long as it takes.
+        //
+        // `Answer` carries the two ObjC objects that cannot cross a task boundary on their own — the
+        // completion block and the credential — with the promise that the block is called exactly once,
+        // which is what the API requires anyway.
+        let space = challenge.protectionSpace
+        let answer = Answer(completionHandler, credential: URLCredential(trust: serverTrust))
+
+        Task {
+            let accepted = await trust.shouldTrust(
+                summary, problems: problems, hostname: space.host, port: space.port
+            )
+            answer.deliver(accepted)
+        }
+    }
+
+    /// Carries a challenge's completion handler into the task that will answer it.
+    ///
+    /// `@unchecked Sendable` with a narrow justification: the block is called exactly once, which is the
+    /// contract `URLSession` states for it, and nothing else reads the stored value.
+    private final class Answer: @unchecked Sendable {
+        private let handler: (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        private let credential: URLCredential
+
+        init(
+            _ handler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void,
+            credential: URLCredential
+        ) {
+            self.handler = handler
+            self.credential = credential
+        }
+
+        func deliver(_ accepted: Bool) {
+            accepted
+                ? handler(.useCredential, credential)
+                : handler(.cancelAuthenticationChallenge, nil)
+        }
+    }
+
+    // MARK: - Redirects
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard let authorization,
+              let original = task.originalRequest?.url,
+              Self.isSameOrigin(original, request.url) else {
+            completionHandler(request)
+            return
+        }
+
+        var authenticated = request
+        authenticated.setValue(authorization, forHTTPHeaderField: "Authorization")
+        completionHandler(authenticated)
+    }
+
+    /// Whether two URLs are the same server, by scheme, host and port.
+    ///
+    /// Compared rather than assumed: a redirect to another host is exactly the case where the
+    /// credentials must not follow.
+    static func isSameOrigin(_ one: URL, _ other: URL?) -> Bool {
+        guard let other else { return false }
+        return one.scheme == other.scheme
+            && one.host()?.lowercased() == other.host()?.lowercased()
+            && one.port == other.port
+    }
+}

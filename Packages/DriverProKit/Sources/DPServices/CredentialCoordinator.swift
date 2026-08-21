@@ -61,6 +61,18 @@ public actor CredentialCoordinator: SessionDelegate {
         await prompt.askHostKey(challenge, for: host)
     }
 
+    /// Forwards to the user.
+    ///
+    /// No lookup here either: `TrustDecider` in the WebDAV backend consults the trusted certificate file
+    /// and only asks about what it cannot settle, exactly as `HostKeyVerifier` does for `known_hosts`.
+    /// Checking again here would either duplicate that logic or contradict it.
+    public func session(
+        _ host: RemoteHost,
+        needsCertificateVerification challenge: CertificateChallenge
+    ) async -> CertificateDecision {
+        await prompt.askCertificate(challenge, for: host)
+    }
+
     /// Answers from the bookmark's chosen method first, the store second, and the user last.
     ///
     /// The bookmark decides *which* question to answer — see

@@ -48,6 +48,8 @@ public final class PromptCoordinator: UserPrompt {
     public enum Question: Identifiable, Sendable {
         /// The server's identity needs confirming.
         case hostKey(HostKeyChallenge, RemoteHost)
+        /// The server's certificate is not vouched for by anyone.
+        case certificate(CertificateChallenge, RemoteHost)
         /// Credentials are needed.
         case credentials(CredentialRequest)
 
@@ -55,6 +57,7 @@ public final class PromptCoordinator: UserPrompt {
         public var id: String {
             switch self {
             case .hostKey(let challenge, _): "hostKey-\(challenge.fingerprint)"
+            case .certificate(let challenge, _): "certificate-\(challenge.fingerprint)"
             case .credentials(let request): "credentials-\(request.host.id)"
             }
         }
@@ -66,6 +69,7 @@ public final class PromptCoordinator: UserPrompt {
     /// question with credentials cannot compile.
     private enum Waiting {
         case hostKey(HostKeyChallenge, RemoteHost, CheckedContinuation<HostKeyDecision, Never>)
+        case certificate(CertificateChallenge, RemoteHost, CheckedContinuation<CertificateDecision, Never>)
         case credentials(CredentialRequest, CheckedContinuation<Credentials?, Never>)
     }
 
@@ -95,6 +99,7 @@ public final class PromptCoordinator: UserPrompt {
     public var pending: Question? {
         switch waiting.first {
         case .hostKey(let challenge, let host, _): .hostKey(challenge, host)
+        case .certificate(let challenge, let host, _): .certificate(challenge, host)
         case .credentials(let request, _): .credentials(request)
         case nil: nil
         }
@@ -113,6 +118,20 @@ public final class PromptCoordinator: UserPrompt {
     public func askHostKey(_ challenge: HostKeyChallenge, for host: RemoteHost) async -> HostKeyDecision {
         await withCheckedContinuation { continuation in
             waiting.append(.hostKey(challenge, host, continuation))
+        }
+    }
+
+    /// Suspends until the user answers, publishing the question for a view to present.
+    /// - Parameters:
+    ///   - challenge: The certificate being offered.
+    ///   - host: The connection being established.
+    /// - Returns: What the user chose. A dismissed sheet counts as a refusal.
+    public func askCertificate(
+        _ challenge: CertificateChallenge,
+        for host: RemoteHost
+    ) async -> CertificateDecision {
+        await withCheckedContinuation { continuation in
+            waiting.append(.certificate(challenge, host, continuation))
         }
     }
 
@@ -145,6 +164,18 @@ public final class PromptCoordinator: UserPrompt {
         continuation.resume(returning: decision)
     }
 
+    /// Answers a pending certificate question.
+    ///
+    /// Ignored when the outstanding question is not about a certificate, so a stale view cannot resume
+    /// the wrong continuation.
+    ///
+    /// - Parameter decision: What the user chose.
+    public func answerCertificate(_ decision: CertificateDecision) {
+        guard case .certificate(_, _, let continuation)? = waiting.first else { return }
+        waiting.removeFirst()
+        continuation.resume(returning: decision)
+    }
+
     /// Answers a pending credential question.
     ///
     /// - Parameter credentials: What the user supplied, or `nil` if they cancelled.
@@ -161,6 +192,9 @@ public final class PromptCoordinator: UserPrompt {
     public func dismiss() {
         switch waiting.first {
         case .hostKey(_, _, let continuation):
+            waiting.removeFirst()
+            continuation.resume(returning: .reject)
+        case .certificate(_, _, let continuation):
             waiting.removeFirst()
             continuation.resume(returning: .reject)
         case .credentials(_, let continuation):

@@ -149,9 +149,14 @@ public struct ProtocolCatalog: Sendable {
 
     /// Builds the factory that turns a bookmark into a session.
     ///
-    /// - Parameter knownHosts: Where SSH host keys are read and recorded.
+    /// - Parameters:
+    ///   - knownHosts: Where SSH host keys are read and recorded.
+    ///   - trustedCertificates: Where accepted TLS certificates are recorded.
     /// - Returns: A factory covering every protocol in the catalog.
-    public func makeSessionFactory(knownHosts: KnownHostsStore) -> any SessionFactory {
+    public func makeSessionFactory(
+        knownHosts: KnownHostsStore,
+        trustedCertificates: TrustedCertificateStore = TrustedCertificateStore()
+    ) -> any SessionFactory {
         ClosureSessionFactory([
             .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) }
         ])

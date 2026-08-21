@@ -42,7 +42,13 @@ struct WebDAVTransport: Sendable {
     ///   - configuration: The session configuration. A test installs a stubbed protocol through it.
     ///   - username: Account name, if the server wants one.
     ///   - password: Its password.
-    init(configuration: URLSessionConfiguration, username: String?, password: String?) {
+    ///   - trust: Who decides about a certificate the system refused.
+    init(
+        configuration: URLSessionConfiguration,
+        username: String?,
+        password: String?,
+        trust: TrustDecider? = nil
+    ) {
         // Basic, pre-emptively, rather than waiting to be challenged. A `URLSession` challenge handler
         // would work for one request at a time, but WebDAV sends many small ones and paying a 401 round
         // trip for each doubles the cost of every listing. Nextcloud app passwords are Basic too.
@@ -55,7 +61,7 @@ struct WebDAVTransport: Sendable {
 
         self.session = URLSession(
             configuration: configuration,
-            delegate: WebDAVRedirectAuthenticator(authorization: credentials),
+            delegate: WebDAVConnectionDelegate(authorization: credentials, trust: trust),
             delegateQueue: nil
         )
     }
