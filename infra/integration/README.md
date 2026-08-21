@@ -9,26 +9,60 @@ cannot give you.
 ## Usage
 
 ```sh
-infra/integration/script.sh
+infra/integration/script.sh              # everything
+infra/integration/script.sh sftp         # SFTP only
+infra/integration/script.sh webdav       # the plain WebDAV server and its TLS front
+infra/integration/script.sh nextcloud    # Nextcloud only
 ```
 
-Starts every service, runs the whole test suite with the integration tests enabled, and tears them
-down again — including if the tests fail or you interrupt it. Requires Docker.
+Starts what is asked for, runs the suite, and tears it down again — including if the tests fail or you
+interrupt it. Requires Docker.
+
+A bare run still tests everything, which is what a release check wants. The argument only narrows it.
+
+## Features
+
+| Feature | Services | Roughly |
+|---|---|---|
+| `sftp` | `sftp` | a second to start |
+| `webdav` | `webdav`, `webdav-tls` | a second or two |
+| `nextcloud` | `nextcloud` | most of a minute — it lays out a database on first start |
+
+**Why the split.** This began as one service, and the runner deliberately took no argument: it started
+whatever compose defined, and that was right. With four services it is not. A one-line change to the
+SFTP backend should not wait for Nextcloud to install, and when something does fail, four servers
+competing for the machine make it much harder to say what failed.
+
+The mechanism is worth knowing because it is what keeps the runner simple:
+
+- **Compose profiles** decide what starts. Every service carries one, so `--profile` — or
+  `COMPOSE_PROFILES`, which `.env` sets to all of them — chooses.
+- **The tests select themselves.** Every suite is gated on its own `<SERVICE>_HOST`, so the runner does
+  not filter by name; it simply does not export the other features' host settings, and those suites skip
+  for the reason they were built to skip. No regex over suite names to fall out of date.
+
+Check the run's output for skips rather than assuming: a feature run that started nothing would
+otherwise look green because its tests never ran.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `script.sh` | Runner. Starts everything, runs the suite, tears it down; knows nothing protocol-specific. |
-| `docker-compose.yml` | The services. |
+| `script.sh` | Runner. Starts a feature or all of them, runs the suite, tears it down. |
+| `docker-compose.yml` | The services, each behind a profile. |
 | `.env` | Every service's configuration. The same names are what the tests read. |
 
 ## Adding a service
 
-M4 (S3) needs one; M3's WebDAV is already here. Add a service to `docker-compose.yml` and its settings to
-`.env`, then gate the new suite behind its own `<SERVICE>_HOST` so the offline default stays offline.
-**`script.sh` does not change** — it starts whatever compose defines, rather than growing a
-subcommand or an argument per protocol.
+M4 (S3) needs one; M3's WebDAV is already here. Three places, all in this directory:
+
+1. A service in `docker-compose.yml`, with a `profiles:` key naming its feature.
+2. Its settings in `.env`, including `<SERVICE>_HOST`, and the feature added to `COMPOSE_PROFILES`.
+3. A row in `script.sh`'s feature table — the name, and which `_HOST` variable it owns.
+
+Then gate the new suite behind that `<SERVICE>_HOST` so the offline default stays offline. The runner
+still knows nothing protocol-specific: the table says which name maps to which setting, and nothing
+else about the protocol.
 
 ## Why the config lives in `.env`
 
@@ -40,7 +74,8 @@ They were once written out in two places, and changing the password in one produ
 could not log into, with an authentication error that pointed at the code rather than the config.
 
 `.env` is Docker's default, so a bare `docker compose -f infra/integration/docker-compose.yml up` picks
-it up with no flag and gives you exactly the server the tests expect. Nothing secret goes in here.
+it up with no flag and gives you exactly the servers the tests expect — `COMPOSE_PROFILES` in there is
+what keeps that working now every service sits behind a profile. Nothing secret goes in here.
 
 ## Public key authentication
 
@@ -64,7 +99,7 @@ that quietly used whatever was in your agent would be unpredictable:
 ```sh
 eval "$(ssh-agent -s)"
 ssh-add infra/integration/keys/id_ed25519
-DP_AGENT_TESTS=1 infra/integration/script.sh
+DP_AGENT_TESTS=1 infra/integration/script.sh sftp
 ```
 
 `script.sh` does not start an agent, in keeping with the rule above that the runner knows nothing

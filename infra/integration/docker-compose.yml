@@ -1,5 +1,8 @@
 services:
   sftp:
+    # Profiles are what let `script.sh sftp` start one container instead of four. A service with no
+    # profile always starts, so every service here has one.
+    profiles: ["sftp"]
     image: atmoz/sftp:alpine
     container_name: integration-sftp
     platform: linux/amd64
@@ -20,6 +23,7 @@ services:
       start_period: 2s
 
   webdav:
+    profiles: ["webdav"]
     image: bytemark/webdav:2.4
     container_name: integration-webdav
     platform: linux/amd64
@@ -42,6 +46,9 @@ services:
   # which is exactly the case slice 3c exists to handle: the servers WebDAV is actually run on — a
   # Nextcloud in a cupboard, a NAS — very often look like this.
   webdav-tls:
+    # Shares the WebDAV profile: a TLS terminator with nothing behind it is useless, and the trust tests
+    # need both.
+    profiles: ["webdav"]
     image: caddy:2-alpine
     container_name: integration-webdav-tls
     platform: linux/amd64
@@ -64,3 +71,28 @@ services:
       timeout: 5s
       retries: 30
       start_period: 5s
+
+  nextcloud:
+    # Its own profile. It is WebDAV, but it takes forty seconds to install where the plain server takes
+    # one, and that difference is the whole reason the features are split.
+    profiles: ["nextcloud"]
+    image: nextcloud:30-apache
+    container_name: integration-nextcloud
+    platform: linux/amd64
+    ports:
+      - "${NEXTCLOUD_PORT}:80"
+    environment:
+      SQLITE_DATABASE: nextcloud          # no separate database container to wait on
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_USER}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_PASSWORD}
+      # Without this Nextcloud refuses requests whose Host header it does not recognise, which from a
+      # test looks like a mysterious 400.
+      NEXTCLOUD_TRUSTED_DOMAINS: localhost
+    healthcheck:
+      # `status.php` answers only once installation has finished, which is what needs waiting for — the
+      # port is listening long before the server is usable.
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost/status.php | grep -q '\"installed\":true'"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
