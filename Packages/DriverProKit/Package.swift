@@ -29,6 +29,7 @@ let package = Package(
         .library(name: "DPCore", targets: ["DPCore"]),
         .library(name: "DPCredentials", targets: ["DPCredentials"]),
         .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"]),
+        .library(name: "DPProtocolWebDAV", targets: ["DPProtocolWebDAV"]),
         .library(name: "DPDatabase", targets: ["DPDatabase"]),
         .library(name: "DPBookmarks", targets: ["DPBookmarks"]),
         .library(name: "DPTransfer", targets: ["DPTransfer"]),
@@ -90,6 +91,20 @@ let package = Package(
             ],
             swiftSettings: swiftSettings
         ),
+        // The WebDAV backend. Foundation only — URLSession and XMLParser are the whole transport, so a
+        // second protocol costs no dependency at all. Like DPProtocolSFTP, nothing imports it but the
+        // composition root.
+        .target(
+            name: "DPProtocolWebDAV",
+            dependencies: ["DPCore"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPProtocolWebDAVTests",
+            dependencies: ["DPProtocolWebDAV", "DPCore", "DPTestSupport"],
+            swiftSettings: swiftSettings
+        ),
+
         // Persistence. Wraps the system SQLite3 — no third-party dependency — and knows nothing about
         // any DriverPro model, so DPBookmarks and (in M2) DPTransfer can both sit on top.
         .target(
