@@ -243,19 +243,23 @@ public final class TransferListModel {
     ///
     /// Separated from ``start(_:title:)`` so tests can feed a stream directly rather than standing up a
     /// queue and a server.
+    /// - Parameter throttleInterval: How long between progress writes. Tests that are about *what* is
+    ///   tracked rather than *how often* pass zero, so every event is written and nothing depends on a
+    ///   wall clock. `ProgressThrottleTests` covers the coalescing itself, with a clock it controls.
     func consume(
         _ stream: AsyncStream<TransferEvent>,
         id: UUID,
         title: String,
         isDownload: Bool,
-        connection: String = ""
+        connection: String = "",
+        throttleInterval: TimeInterval = 0.1
     ) {
         contexts[id] = Context(title: title, connection: connection, isDownload: isDownload)
         reports[id] = nil
         rows.insert(makeRow(for: id, title: title), at: 0)
 
         tasks[id] = Task { [weak self] in
-            var throttle = ProgressThrottle()
+            var throttle = ProgressThrottle(interval: throttleInterval)
             var pending: [RemotePath: Int64] = [:]
 
             for await event in stream {

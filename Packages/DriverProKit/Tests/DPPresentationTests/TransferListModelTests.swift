@@ -172,16 +172,13 @@ struct TransferListModelTests {
         let first = makeItem("first.bin", size: 1_000)
         let second = makeItem("second.bin", size: 400)
 
-        model.consume(stream, id: UUID(), title: "two", isDownload: true)
+        // No throttle: this test is about which bytes land on which row, not about how often rows are
+        // written. Coalescing has its own tests with a clock they control — depending on it here made
+        // this one fail whenever a parallel run delayed the consuming task past the interval.
+        model.consume(stream, id: UUID(), title: "two", isDownload: true, throttleInterval: 0)
         continuation.yield(.itemStarted(first))
         continuation.yield(.itemStarted(second))
         continuation.yield(.itemProgress(first, bytes: 250))
-        continuation.yield(.itemProgress(second, bytes: 400))
-
-        // The second count is inside the throttle's interval, so it is remembered rather than written.
-        // Waiting past the interval and sending one more event flushes everything pending — which is
-        // the coalescing working, not a delay to paper over.
-        try await Task.sleep(for: .milliseconds(120))
         continuation.yield(.itemProgress(second, bytes: 400))
         try await waitUntil { model.rows.allSatisfy { $0.transferredBytes > 0 } }
 
