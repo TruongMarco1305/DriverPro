@@ -94,3 +94,29 @@ services:
       timeout: 5s
       retries: 60
       start_period: 30s
+
+  # TLS in front of Nextcloud, for the manual pass rather than the tests. The tests set
+  # `webdav.allowsInsecureHTTP` and use plain HTTP; the app has no UI for that property and always builds
+  # an https:// URL, so without this there is no way to point DriverPro at the local Nextcloud by hand.
+  # The certificate is self-signed, so the trust prompt is part of the walk — which is the right pairing.
+  nextcloud-tls:
+    profiles: ["nextcloud"]
+    image: caddy:2-alpine
+    container_name: integration-nextcloud-tls
+    depends_on:
+      nextcloud:
+        condition: service_healthy
+    ports:
+      - "${NEXTCLOUD_TLS_PORT}:443"
+    command: >
+      caddy reverse-proxy
+        --from https://localhost:443
+        --to http://nextcloud:80
+    healthcheck:
+      # Nextcloud answers status.php without authentication, so this checks the whole path — TLS
+      # terminates, the proxy reaches Nextcloud, and Nextcloud is installed.
+      test: ["CMD", "sh", "-c", "wget -q --no-check-certificate -O - https://localhost/status.php 2>&1 | grep -q '\"installed\":true'"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
