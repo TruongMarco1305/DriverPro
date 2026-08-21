@@ -46,12 +46,9 @@ services:
   # which is exactly the case slice 3c exists to handle: the servers WebDAV is actually run on — a
   # Nextcloud in a cupboard, a NAS — very often look like this.
   webdav-tls:
-    # Shares the WebDAV profile: a TLS terminator with nothing behind it is useless, and the trust tests
-    # need both.
     profiles: ["webdav"]
     image: caddy:2-alpine
     container_name: integration-webdav-tls
-    platform: linux/amd64
     depends_on:
       webdav:
         condition: service_healthy
@@ -76,9 +73,10 @@ services:
     # Its own profile. It is WebDAV, but it takes forty seconds to install where the plain server takes
     # one, and that difference is the whole reason the features are split.
     profiles: ["nextcloud"]
+    # Deliberately *not* pinned to an architecture: this image is published for arm64 too, and running
+    # it emulated made the server so slow that ordinary requests timed out. See the note below.
     image: nextcloud:30-apache
     container_name: integration-nextcloud
-    platform: linux/amd64
     ports:
       - "${NEXTCLOUD_PORT}:80"
     environment:

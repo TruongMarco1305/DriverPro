@@ -52,6 +52,32 @@ otherwise look green because its tests never ran.
 | `docker-compose.yml` | The services, each behind a profile. |
 | `.env` | Every service's configuration. The same names are what the tests read. |
 
+## Architecture, and why it is not `linux/amd64` everywhere
+
+Every service here was once pinned to `platform: linux/amd64`. On an Apple Silicon machine that means
+Docker emulates the container, and for an `sshd` or an Apache serving a scratch directory the cost is
+invisible.
+
+For Nextcloud it was not. Emulated, it was slow enough to break rather than merely drag: plain
+`PROPFIND`s against an idle server timed out three times in five, and the suite failed with timeouts and
+with errors about files that a previous, silently-stalled request had never created. Every one of those
+looked like a bug in DriverPro's WebDAV client. None were. Running it natively took the same suite from
+191 seconds and three failures to 4 seconds and none.
+
+**So pin only the images that leave no choice.** `atmoz/sftp` and `bytemark/webdav` publish amd64 alone
+and are small enough not to care. `caddy` and `nextcloud` publish `arm64` and must be allowed to use it.
+
+```sh
+docker manifest inspect <image> | grep architecture
+```
+
+Worth running before adding a service in M4. And if an already-pulled image is the wrong architecture,
+compose will keep reusing it — `docker pull --platform linux/arm64 <image>` first, then check:
+
+```sh
+docker exec <container> uname -m
+```
+
 ## Adding a service
 
 M4 (S3) needs one; M3's WebDAV is already here. Three places, all in this directory:
