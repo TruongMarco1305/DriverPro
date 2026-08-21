@@ -28,17 +28,21 @@ struct WebDAVTransport: Sendable {
     }
 
     private let session: URLSession
-    private let credentials: String?
 
-    /// Creates a transport.
+    /// The `Authorization` header every request carries, and that a redirect must not lose.
+    let credentials: String?
+
+    /// Creates a transport, and the session it sends on.
+    ///
+    /// The session is built here rather than injected because it needs a delegate that knows the
+    /// credentials — see ``WebDAVRedirectAuthenticator`` — and those are only known once the user has
+    /// supplied them.
     ///
     /// - Parameters:
-    ///   - session: The `URLSession` to send on. Injected so a test can supply a stubbed protocol.
+    ///   - configuration: The session configuration. A test installs a stubbed protocol through it.
     ///   - username: Account name, if the server wants one.
     ///   - password: Its password.
-    init(session: URLSession, username: String?, password: String?) {
-        self.session = session
-
+    init(configuration: URLSessionConfiguration, username: String?, password: String?) {
         // Basic, pre-emptively, rather than waiting to be challenged. A `URLSession` challenge handler
         // would work for one request at a time, but WebDAV sends many small ones and paying a 401 round
         // trip for each doubles the cost of every listing. Nextcloud app passwords are Basic too.
@@ -48,6 +52,36 @@ struct WebDAVTransport: Sendable {
         } else {
             self.credentials = nil
         }
+
+        self.session = URLSession(
+            configuration: configuration,
+            delegate: WebDAVRedirectAuthenticator(authorization: credentials),
+            delegateQueue: nil
+        )
+    }
+
+    /// Finishes what is in flight and releases the session's delegate.
+    func invalidate() {
+        session.finishTasksAndInvalidate()
+    }
+
+    // MARK: - Building
+
+    /// Builds a request, authenticated and ready to send.
+    ///
+    /// Exposed because streaming a download or an upload cannot go through ``send(_:to:about:headers:body:)``
+    /// — those need the request itself, to hand to a delegate or a body stream — and the credentials
+    /// should be attached in exactly one place regardless.
+    ///
+    /// - Parameters:
+    ///   - method: The verb.
+    ///   - url: Where to send it.
+    /// - Returns: The request.
+    func request(_ method: Method, to url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method.rawValue
+        if let credentials { request.setValue(credentials, forHTTPHeaderField: "Authorization") }
+        return request
     }
 
     // MARK: - Sending
@@ -70,10 +104,8 @@ struct WebDAVTransport: Sendable {
         headers: [String: String] = [:],
         body: Data? = nil
     ) async throws -> (data: Data, response: HTTPURLResponse) {
-        var request = URLRequest(url: url)
-        request.httpMethod = method.rawValue
+        var request = self.request(method, to: url)
         request.httpBody = body
-        if let credentials { request.setValue(credentials, forHTTPHeaderField: "Authorization") }
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
 
         let data: Data

@@ -283,6 +283,99 @@ struct WebDAVSessionTests {
         #expect(await !session.exists(RemotePath("/gone")))
     }
 
+    // MARK: - Changing the namespace
+
+    @Test("Creating a directory is a MKCOL with no body, at a URL ending in a slash")
+    func createDirectoryShape() async throws {
+        let session = try await connected(then: [.init(status: 201)])
+        try await session.createDirectory(RemotePath("/srv/new"))
+
+        let request = try #require(StubURLProtocol.requests.last)
+        #expect(request.method == "MKCOL")
+        #expect(request.url.absoluteString == "https://cloud.example.com/srv/new/")
+        #expect(request.body?.isEmpty ?? true, "MKCOL takes no body")
+    }
+
+    @Test("A rename sends an absolute Destination and refuses to overwrite")
+    func moveShape() async throws {
+        // Without `Overwrite: F` a rename onto an existing name silently replaces it, and the contract's
+        // promise that renaming leaves nothing behind would hold for the wrong reason.
+        let session = try await connected(then: [.init(status: 201)])
+        try await session.move(RemotePath("/srv/before.txt"), to: RemotePath("/srv/after.txt"))
+
+        let request = try #require(StubURLProtocol.requests.last)
+        #expect(request.method == "MOVE")
+        #expect(request.headers["Destination"] == "https://cloud.example.com/srv/after.txt",
+                "the specification requires an absolute destination")
+        #expect(request.headers["Overwrite"] == "F")
+    }
+
+    @Test("Deleting is one request, whatever is there")
+    func deleteShape() async throws {
+        // `DELETE` on a collection is recursive by RFC 4918 — one request removes a whole tree, which is
+        // why `recursiveDelete` is advertised and why nothing walks the tree first.
+        let session = try await connected(then: [.init(status: 204)])
+        try await session.delete(RemotePath("/srv/tree"))
+
+        #expect(StubURLProtocol.requests.last?.method == "DELETE")
+        #expect(StubURLProtocol.requests.count == 2, "connect, then the delete — nothing enumerated")
+    }
+
+    // MARK: - Moving bytes
+
+    @Test("A read from the start sends no Range header")
+    func readWithoutOffset() async throws {
+        let session = try await connected(then: [.init(status: 200, body: Data("hello".utf8))])
+
+        var received = Data()
+        for try await chunk in try await session.read(RemotePath("/srv/a.txt"), from: 0) {
+            received.append(chunk)
+        }
+
+        #expect(received == Data("hello".utf8))
+        #expect(StubURLProtocol.requests.last?.headers["Range"] == nil)
+    }
+
+    @Test("A read from an offset asks for the rest of the file")
+    func readWithOffset() async throws {
+        let session = try await connected(then: [.init(status: 206, body: Data("world".utf8))])
+
+        var received = Data()
+        for try await chunk in try await session.read(RemotePath("/srv/a.txt"), from: 6) {
+            received.append(chunk)
+        }
+
+        #expect(received == Data("world".utf8))
+        #expect(StubURLProtocol.requests.last?.headers["Range"] == "bytes=6-")
+    }
+
+    @Test("An upload sends a PUT with the size it was given")
+    func writeShape() async throws {
+        // Without `Content-Length`, URLSession falls back to chunked transfer encoding, which some
+        // servers and reverse proxies refuse outright.
+        let session = try await connected(then: [.init(status: 201)])
+        let payload = Data("hello".utf8)
+
+        try await session.write(RemotePath("/srv/a.txt"),
+                                contents: SessionContract.stream(payload),
+                                size: Int64(payload.count), resumingAt: 0)
+
+        let request = try #require(StubURLProtocol.requests.last)
+        #expect(request.method == "PUT")
+        #expect(request.body == payload, "every chunk reaches the wire, in order")
+    }
+
+    @Test("An upload asked to resume refuses rather than starting over quietly")
+    func writeRefusesAnOffset() async throws {
+        let session = try await connected()
+
+        await #expect(throws: SessionError.unsupported(.resumeUpload, operation: "resuming an upload")) {
+            try await session.write(RemotePath("/srv/a.txt"),
+                                    contents: SessionContract.stream(Data("x".utf8)),
+                                    size: 1, resumingAt: 50)
+        }
+    }
+
     // MARK: - Capabilities
 
     @Test("WebDAV's capabilities are its own, not SFTP's")

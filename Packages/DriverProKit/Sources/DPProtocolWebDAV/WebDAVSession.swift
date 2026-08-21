@@ -33,7 +33,9 @@ public actor WebDAVSession: Session {
     public nonisolated let host: RemoteHost
 
     private let paths: WebDAVPaths
-    private let urlSession: URLSession
+    /// Kept because every request path needs a session of its own: the transport's carries the redirect
+    /// delegate, and a download or an upload needs one it can attach its own delegate or body stream to.
+    private let configuration: URLSessionConfiguration
 
     private var transport: WebDAVTransport?
     private var delegate: (any SessionDelegate)?
@@ -65,7 +67,7 @@ public actor WebDAVSession: Session {
 
         self.host = host
         self.paths = paths
-        self.urlSession = URLSession(configuration: configuration)
+        self.configuration = configuration
     }
 
     // MARK: - Connecting
@@ -94,7 +96,7 @@ public actor WebDAVSession: Session {
         }
 
         let transport = WebDAVTransport(
-            session: urlSession, username: supplied.username, password: password
+            configuration: configuration, username: supplied.username, password: password
         )
         // Depth 0: this asks only about the root itself. Depth 1 would list the whole top directory
         // before anyone had asked to see it.
@@ -116,7 +118,7 @@ public actor WebDAVSession: Session {
 
     /// Stops reusing connections. There is no session to close.
     public func disconnect() async {
-        urlSession.invalidateAndCancel()
+        transport?.invalidate()
         transport = nil
         delegate = nil
     }
@@ -130,17 +132,39 @@ public actor WebDAVSession: Session {
     /// - Throws: ``SessionError/notFound(_:)`` if it is not there.
     public func list(_ directory: RemotePath) async throws -> [RemoteItem] {
         let transport = try requireTransport()
-        let (data, _) = try await transport.send(
-            .propfind,
-            to: paths.url(for: directory, isDirectory: true),
-            about: directory,
-            headers: ["Depth": "1", "Content-Type": "application/xml; charset=utf-8"],
-            body: Self.propfindBody
-        )
+        let data: Data
+
+        do {
+            (data, _) = try await transport.send(
+                .propfind,
+                to: paths.url(for: directory, isDirectory: true),
+                about: directory,
+                headers: ["Depth": "1", "Content-Type": "application/xml; charset=utf-8"],
+                body: Self.propfindBody
+            )
+        } catch {
+            // Apache answers 400 to a `PROPFIND` of `file/` — the trailing slash that keeps collections
+            // from being redirected is a syntax error on something that is not one. "The server answered
+            // 400" is not something a user can act on, so ask what it actually is before reporting it.
+            if let item = try? await stat(directory), !item.isDirectory {
+                throw SessionError.notADirectory(directory)
+            }
+            throw error
+        }
+
+        let entries = try MultiStatusParser.parse(data)
+
+        // WebDAV answers PROPFIND on a *file* perfectly happily, with one entry. Without this check the
+        // browser would show an empty folder where a file is — `SessionContract.listingAFileThrows`
+        // demands otherwise, and it is right to.
+        if let itself = entries.first(where: { paths.path(fromHref: $0.href) == directory }),
+           !itself.isCollection {
+            throw SessionError.notADirectory(directory)
+        }
 
         // A Depth 1 response includes the collection itself, always first by convention but not by
         // rule. Dropping it by *path* rather than by position is what makes that convention irrelevant.
-        return try MultiStatusParser.parse(data).compactMap { entry in
+        return entries.compactMap { entry in
             guard let path = paths.path(fromHref: entry.href), path != directory else { return nil }
             return entry.makeItem(at: path)
         }
@@ -186,63 +210,115 @@ public actor WebDAVSession: Session {
         host.defaultPath ?? .root
     }
 
-    // MARK: - Not built yet
-    //
-    // Slice 3a is browsing. These arrive in 3b, each already knowing which verb it will use. They throw
-    // rather than being absent so the type conforms and the rest can be exercised — and so a caller that
-    // reaches one gets a refusal rather than a crash.
+    // MARK: - Changing the namespace
 
-    /// Not built yet — slice 3b, as `MKCOL`.
-    /// - Parameter path: The directory to create.
-    /// - Throws: Always, until 3b.
+    /// Creates a directory.
+    ///
+    /// - Parameter path: Where to create it.
+    /// - Throws: ``SessionError/alreadyExists(_:)`` if something is already there — which is what a 405
+    ///   means for `MKCOL` — or ``SessionError/notFound(_:)`` naming the *parent* when it is missing,
+    ///   which is what a 409 means.
     public func createDirectory(_ path: RemotePath) async throws {
-        throw SessionError.unsupported(capabilities, operation: "creating a directory")
+        let transport = try requireTransport()
+        try await transport.send(.mkcol, to: paths.url(for: path, isDirectory: true), about: path)
     }
 
-    /// Not built yet — slice 3b, as `DELETE`, which WebDAV defines as recursive on a collection.
+    /// Removes an entry.
+    ///
+    /// A collection goes with everything inside it: RFC 4918 defines `DELETE` on a collection as
+    /// recursive, which is why ``capabilities`` advertises ``SessionCapabilities/recursiveDelete`` and
+    /// why `DirectoryTree.deleteTree` will not walk the tree for this backend.
+    ///
     /// - Parameter path: What to remove.
-    /// - Throws: Always, until 3b.
+    /// - Throws: ``SessionError/notFound(_:)`` if it is not there.
     public func delete(_ path: RemotePath) async throws {
-        throw SessionError.unsupported(capabilities, operation: "deleting")
+        let transport = try requireTransport()
+        try await transport.send(.delete, to: paths.url(for: path), about: path)
     }
 
-    /// Not built yet — slice 3b, as `MOVE` with a `Destination` header, done server-side.
+    /// Moves an entry, server-side.
+    ///
+    /// One request, however large the file — the reason ``SessionCapabilities/rename`` is advertised
+    /// here where SFTP has to be asked separately.
+    ///
     /// - Parameters:
     ///   - source: What to move.
     ///   - destination: Where it goes.
-    /// - Throws: Always, until 3b.
+    /// - Throws: ``SessionError/alreadyExists(_:)`` if something is already at the destination.
     public func move(_ source: RemotePath, to destination: RemotePath) async throws {
-        throw SessionError.unsupported(capabilities, operation: "renaming")
+        let transport = try requireTransport()
+        try await transport.send(
+            .move,
+            to: paths.url(for: source),
+            about: source,
+            headers: [
+                // Absolute, per the specification — a relative destination is not allowed.
+                "Destination": paths.url(for: destination).absoluteString,
+                // Without this a rename onto an existing name silently replaces it, and the contract's
+                // promise that renaming leaves nothing behind would be true for the wrong reason.
+                "Overwrite": "F"
+            ]
+        )
     }
 
-    /// Not built yet — slice 3b, as `GET` with a `Range` header for the offset.
+    // MARK: - Moving bytes
+
+    /// Reads a file, streamed.
+    ///
     /// - Parameters:
     ///   - path: What to read.
-    ///   - offset: Where to start.
-    /// - Returns: Nothing yet.
-    /// - Throws: Always, until 3b.
+    ///   - offset: Where to start. Sent as a `Range` header.
+    /// - Returns: The bytes, in chunks.
+    /// - Throws: ``SessionError/notFound(_:)`` if it is not there, or
+    ///   ``SessionError/protocolViolation(_:)`` if a resumed read was asked for and the server sent the
+    ///   whole file instead.
     public func read(
         _ path: RemotePath,
         from offset: Int64
     ) async throws -> AsyncThrowingStream<Data, any Error> {
-        throw SessionError.unsupported(capabilities, operation: "downloading")
+        let transport = try requireTransport()
+        var request = transport.request(.get, to: paths.url(for: path))
+
+        if offset > 0 {
+            request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
+        }
+        return WebDAVDownload.stream(
+            request, path: path, expectsRange: offset > 0,
+            configuration: configuration, authorization: transport.credentials
+        )
     }
 
-    /// Not built yet — slice 3b, as `PUT`. The offset will be ignored: WebDAV has no resumable upload,
-    /// which is why ``capabilities`` omits ``SessionCapabilities/resumeUpload``.
+    /// Writes a file, streamed.
+    ///
     /// - Parameters:
     ///   - path: Where to write.
     ///   - contents: The bytes.
-    ///   - size: How many, when known.
-    ///   - offset: Where to resume from. Not supported here.
-    /// - Throws: Always, until 3b.
+    ///   - size: How many, when known. Sent as `Content-Length`; without it URLSession falls back to
+    ///     chunked transfer encoding, which some servers and reverse proxies refuse.
+    ///   - offset: Must be zero.
+    /// - Throws: ``SessionError/unsupported(_:operation:)`` for a non-zero offset — there is no standard
+    ///   resumable `PUT`, and starting from zero while pretending to resume would corrupt the file.
     public func write(
         _ path: RemotePath,
         contents: AsyncThrowingStream<Data, any Error>,
         size: Int64?,
         resumingAt offset: Int64
     ) async throws {
-        throw SessionError.unsupported(capabilities, operation: "uploading")
+        guard offset == 0 else {
+            try require(.resumeUpload, for: "resuming an upload")
+            return
+        }
+
+        let transport = try requireTransport()
+        var request = transport.request(.put, to: paths.url(for: path))
+        if let size {
+            request.setValue(String(size), forHTTPHeaderField: "Content-Length")
+        }
+
+        try await WebDAVUpload.send(
+            request, contents: contents, path: path,
+            configuration: configuration, authorization: transport.credentials
+        )
     }
 
     // MARK: - What WebDAV does not have
