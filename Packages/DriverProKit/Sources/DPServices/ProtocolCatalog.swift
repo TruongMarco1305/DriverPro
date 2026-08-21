@@ -118,7 +118,7 @@ public struct ProtocolCatalog: Sendable {
         ProtocolDescriptor(
             id: .sftp,
             displayName: "SFTP",
-            summary: "Secure file transfer over an SSH connection. The usual choice for Linux and Unix servers.",
+            summary: "Secure file transfer over an SSH connection.",
             scheme: "sftp",
             defaultPort: 22,
             fields: [.username, .password, .privateKey, .defaultPath],
