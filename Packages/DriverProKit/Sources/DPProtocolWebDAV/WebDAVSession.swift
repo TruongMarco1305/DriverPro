@@ -39,6 +39,8 @@ public actor WebDAVSession: Session {
     private let trustedCertificates: TrustedCertificateStore
     /// Kept because every request path needs a session of its own: the transport's carries the redirect
     /// delegate, and a download or an upload needs one it can attach its own delegate or body stream to.
+    ///
+    /// Always the hardened copy from ``withoutBrowserBehaviour(_:)``, never the one handed in.
     private let configuration: URLSessionConfiguration
 
     private var transport: WebDAVTransport?
@@ -80,7 +82,37 @@ public actor WebDAVSession: Session {
         self.host = host
         self.paths = paths
         self.trustedCertificates = trustedCertificates
-        self.configuration = configuration
+        self.configuration = Self.withoutBrowserBehaviour(configuration)
+    }
+
+    /// Turns off the two conveniences `URLSession` provides for browsers and that a file transfer
+    /// program must not have: the response cache, and cookies.
+    ///
+    /// **The cache is a correctness bug, not a preference.** `URLSession` stores a `GET` response and
+    /// then revalidates the *next request to that URL* by attaching `If-None-Match` — whatever its
+    /// method. A `DELETE` sent after downloading the same file therefore arrives conditional, and a
+    /// server applying RFC 9110 answers `412 Precondition Failed` and does not delete. Nextcloud does
+    /// exactly this; Apache's `mod_dav` ignores the header, which is why the contract passed against one
+    /// server and not the other. Left in, the cache could also serve stale bytes for a file that changed
+    /// on the server — the worse bug, and a silent one.
+    ///
+    /// Cookies are turned off for a smaller reason: they caused no failure we saw, but a DAV client
+    /// authenticates with every request and needs no session. Sending them back makes Nextcloud open and
+    /// persist a PHP session per request, which is server-side work for state we never read.
+    ///
+    /// - Parameter configuration: The caller's configuration, which is copied rather than modified — a
+    ///   test's stub protocol survives the copy, and an injected object is not mutated behind its back.
+    /// - Returns: The hardened copy.
+    static func withoutBrowserBehaviour(
+        _ configuration: URLSessionConfiguration
+    ) -> URLSessionConfiguration {
+        let hardened = (configuration.copy() as? URLSessionConfiguration) ?? configuration
+        hardened.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        hardened.urlCache = nil
+        hardened.httpShouldSetCookies = false
+        hardened.httpCookieAcceptPolicy = .never
+        hardened.httpCookieStorage = nil
+        return hardened
     }
 
     // MARK: - Connecting

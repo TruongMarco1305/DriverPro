@@ -478,4 +478,36 @@ struct WebDAVSessionTests {
         #expect(WebDAVTransport.mapStatus(409, path: RemotePath("/srv/deep/a.txt"))
                 == .notFound(RemotePath("/srv/deep")))
     }
+
+    // MARK: - Browser behaviour we must not have
+
+    @Test("The session never caches a response, and never carries a cookie")
+    func configurationHasNoCacheAndNoCookies() {
+        let hardened = WebDAVSession.withoutBrowserBehaviour(.ephemeral)
+
+        // The cache is the one that bites. URLSession revalidates the *next request to a URL* with
+        // `If-None-Match` regardless of its method, so a DELETE after a GET of the same file arrives
+        // conditional and Nextcloud answers 412 rather than deleting. Found against a real server; see
+        // `docs/decisions/016-webdav-is-not-a-browser.md`.
+        #expect(hardened.urlCache == nil)
+        #expect(hardened.requestCachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
+
+        #expect(hardened.httpShouldSetCookies == false)
+        #expect(hardened.httpCookieAcceptPolicy == .never)
+        #expect(hardened.httpCookieStorage == nil)
+    }
+
+    @Test("Hardening copies rather than modifies, so an injected stub survives it")
+    func hardeningCopiesTheConfiguration() {
+        let original = URLSessionConfiguration.ephemeral
+        original.protocolClasses = [StubURLProtocol.self]
+
+        let hardened = WebDAVSession.withoutBrowserBehaviour(original)
+
+        // The stub has to come through, or every test in this file would be talking to the network.
+        #expect(hardened.protocolClasses?.contains { $0 == StubURLProtocol.self } == true)
+        // And the caller's object is left as it was, rather than changed under it.
+        #expect(original.httpShouldSetCookies == true)
+        #expect(original.urlCache != nil)
+    }
 }
