@@ -1,0 +1,32 @@
+# SwiftLint overrides for the test targets. Merged over the root .swiftlint.yml — everything not
+# mentioned here still applies.
+#
+# Tests are held to the same standard as the engine with three exceptions, all about fixtures rather than
+# about rigour.
+
+disabled_rules:
+  # `#expect(account == "")` states the assertion being made. `.isEmpty` is the better call in the engine
+  # — where there are no violations — but in an expectation it describes the value less precisely.
+  - empty_string
+
+# A force unwrap on a literal the test itself wrote is not a crash risk, it is the test failing loudly at
+# the right line. In Sources/ this is an error and there are zero of them; here it stays a warning.
+#
+# force_unwrapping is repeated in opt_in_rules only to silence SwiftLint's "found a configuration for a
+# rule that is not enabled" warning: a nested config validates its own keys before the parent is merged in.
+opt_in_rules:
+  - force_unwrapping
+
+force_unwrapping:
+  severity: warning
+
+# A test file is a table of cases, and a table is long. Judging it by the same length limit as a type
+# would push cases out into files where nobody looks for them.
+file_length:
+  warning: 900
+  error: 1500
+  ignore_comment_only_lines: true
+
+type_body_length:
+  warning: 800
+  error: 1200

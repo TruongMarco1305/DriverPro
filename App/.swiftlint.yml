@@ -1,0 +1,9 @@
+# SwiftLint overrides for the app target. Merged over the root .swiftlint.yml — everything not mentioned
+# here still applies.
+#
+# A SwiftUI `body` is a declarative tree, not a procedure. Its length measures how much interface it
+# describes, so the engine's limit — which measures how much a function is doing — reads the wrong thing.
+# Splitting a view to satisfy a line count produces smaller functions and a harder-to-follow interface.
+function_body_length:
+  warning: 120
+  error: 200

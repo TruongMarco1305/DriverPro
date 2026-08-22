@@ -1,0 +1,55 @@
+# SwiftFormat configuration for DriverPro.
+#
+#   swiftformat .          # rewrite
+#   swiftformat --lint .   # check without writing, as Scripts/pre-commit does
+#
+# This is an allowlist, not the default rule set with exceptions carved out. That is deliberate.
+# SwiftFormat's defaults would rewrite 120 of the 134 files here, and the survey that produced this file
+# found the changes were mostly losses: it unaligned hand-aligned ternaries, stripped the digit grouping
+# from `65_536`, respaced `2...1000` into `2 ... 1000`, split every `// MARK:` from the comment written
+# underneath it, and rewrote `case .foo(let x)` into `case let .foo(x)` across the engine.
+#
+# So the formatter is scoped to hygiene: whitespace, redundancy, and the one convention docs/style.md
+# actually asks for. Anything requiring taste — where a declaration wraps, how a comment is worded, which
+# order modifiers go in — stays with the author. Line length is SwiftLint's job, at 110 warning / 130
+# error. See docs/decisions/018-lint-format-and-git-hooks.md.
+
+--swiftversion 6.0
+--indent 4
+
+# .build holds every vendored dependency — swift-nio, Soto, Citadel. Never format those.
+--exclude .build,build,Packages/DriverProKit/.build,Packages/DriverProKit/build,DriverPro.xcodeproj
+
+# docs/style.md: trailing commas in multi-line literals, and nowhere else.
+--trailing-commas collections-only
+
+--rules \
+    trailingCommas,             \
+    trailingSpace,              \
+    consecutiveBlankLines,      \
+    blankLinesBetweenScopes,    \
+    linebreakAtEndOfFile,       \
+    duplicateImports,           \
+    emptyBraces,                \
+    semicolons,                 \
+    leadingDelimiters,          \
+    redundantParens,            \
+    redundantVoidReturnType,    \
+    redundantLet,               \
+    redundantNilInit,           \
+    redundantBreak,             \
+    redundantInit,              \
+    spaceAroundBraces,          \
+    spaceAroundBrackets,        \
+    spaceAroundComments,        \
+    spaceAroundGenerics,        \
+    spaceAroundParens,          \
+    spaceInsideBraces,          \
+    spaceInsideBrackets,        \
+    spaceInsideComments,        \
+    spaceInsideGenerics,        \
+    spaceInsideParens,          \
+    typeSugar,                  \
+    void,                       \
+    assertionFailures,          \
+    todos

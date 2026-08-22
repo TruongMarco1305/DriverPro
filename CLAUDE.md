@@ -88,6 +88,40 @@ xcodegen generate && xcodebuild -scheme DriverPro -destination 'platform=macOS' 
 `DriverPro.xcodeproj` is **generated** from `project.yml` and is gitignored. Edit `project.yml`, never the
 project file.
 
+## Lint, format, and hooks
+
+```sh
+brew install swiftlint swiftformat
+
+# Once per clone — core.hooksPath is local config and is not carried by a fetch.
+git config core.hooksPath Scripts
+
+Scripts/lint-and-check.sh             # formatting, lint, unit tests
+Scripts/lint-and-check.sh --fix       # rewrite what can be rewritten, then check
+```
+
+`Scripts/lint-and-check.sh` is the single source of truth for "is this code clean?". Everything else
+calls it rather than repeating it, so CI and your machine cannot disagree.
+
+| | Runs | Cost |
+|---|---|---|
+| `Scripts/pre-commit` | `lint-and-check.sh --staged --skip-tests` | ~0.5 s |
+| `Scripts/pre-push` | `lint-and-check.sh` + the rule 2 layering checks | ~2 s warm |
+| `Scripts/ci.sh` | `lint-and-check.sh`, plus tool versions and no skips | ~2 s warm |
+| `Scripts/verify.sh` | all of the above **plus** the app build and the documentation rule | minutes |
+
+The unit suite is deliberately not in `pre-commit`. A hook that runs 590 tests on every commit is a hook
+that gets `--no-verify`d within a week, and a bypassed hook checks nothing.
+
+Everything must run from the **repo root** — the scripts `cd` there themselves. SwiftLint reads
+`.swiftlint.yml` from the working directory; started anywhere else it silently falls back to its defaults
+and walks `.build`, which is every vendored dependency.
+
+`git commit --no-verify` and `git push --no-verify` bypass the hooks. A deliberate act, not a shortcut.
+
+Where a lint rule and `docs/style.md` disagree, the document wins and the rule gets configured, with the
+reason written beside it. See `docs/decisions/018-lint-format-and-git-hooks.md`.
+
 ---
 
 ## Milestones

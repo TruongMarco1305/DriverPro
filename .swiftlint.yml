@@ -1,0 +1,180 @@
+# SwiftLint configuration for DriverPro.
+#
+#   swiftlint                     # check
+#   swiftlint --fix               # apply the fixes it can apply itself
+#
+# Run by Scripts/pre-commit over staged files. Warnings are printed; only error-severity violations
+# refuse a commit. See docs/decisions/018-lint-format-and-git-hooks.md for why each rule below is bent.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+
+included:
+  - App
+  - Packages/DriverProKit/Sources
+  - Packages/DriverProKit/Tests
+
+# .build must be excluded or SwiftLint lints every vendored dependency — swift-nio, Soto, Citadel.
+excluded:
+  - .build
+  - build
+  - Packages/DriverProKit/.build
+  - Packages/DriverProKit/build
+  - DriverPro.xcodeproj
+  # A package manifest, not source: it has no file header and declares no public API to document.
+  # Listed under `excluded` rather than simply left out of `included`, because `included` is ignored
+  # when SwiftLint is handed explicit paths — which is exactly what Scripts/pre-commit does.
+  - Packages/DriverProKit/Package.swift
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rules that are wrong for this codebase
+
+disabled_rules:
+  # SessionDelegate is deliberately not class-bound. It is an actor-friendly Sendable protocol answering
+  # questions the engine cannot answer itself, not a retain-cycle-prone AppKit delegate.
+  - class_delegate_protocol
+
+  # String(data:encoding:) reads better than String(bytes:encoding:) and the optionality is handled at
+  # every call site already. Not worth 9 mechanical edits to satisfy a stylistic preference.
+  - optional_data_string_conversion
+
+  # SwiftFormat's trailingCommas rule owns this, and the two disagree: SwiftLint counts an array whose
+  # closing bracket shares a line with its last element as multi-line and wants a comma before the `]`.
+  # SwiftFormat, rightly, does not. One tool, one opinion — see .swiftformat.
+  - trailing_comma
+
+  # Misfires on a `switch` expression. WebDAVTransport.mapStatus returns a SessionError from a ternary
+  # inside a switch case; the rule reads the implicit return as a discarded call and objects. The genuine
+  # instance this rule was meant to catch has been rewritten as an if/else in WebDAVConnectionDelegate.
+  - void_function_in_ternary
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rules the project opts into
+#
+# Most of these lock in a property the code already has rather than asking for a change.
+# force_unwrapping is the one that earns its keep: Sources/ currently contains zero force unwraps.
+
+opt_in_rules:
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - empty_count
+  - empty_string
+  - first_where
+  - last_where
+  - contains_over_filter_count
+  - contains_over_first_not_nil
+  - redundant_nil_coalescing
+  - sorted_first_last
+  - toggle_bool
+  - yoda_condition
+  - fatal_error_message
+  - file_header
+  - modifier_order
+  - operator_usage_whitespace
+  - closure_spacing
+  - collection_alignment
+  - discouraged_optional_boolean
+  - joined_default_parameter
+  - unneeded_parentheses_in_closure_argument
+  - vertical_parameter_alignment_on_call
+  - convenience_type
+  - unavailable_function
+  - explicit_init
+  - multiline_parameters
+  - prefer_zero_over_explicit_init
+  - static_operator
+  - flatmap_over_map_reduce
+  - reduce_into
+  - period_spacing
+  - comma_inheritance
+  - self_binding
+  - optional_enum_case_matching
+  - return_value_from_void_function
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rule configuration
+
+# docs/style.md's soft limit is 110, and it covers prose as well as code. The error threshold sits well
+# above it so the limit stays advisory: a line worth breaking gets flagged, but no commit is refused over
+# a doc comment running four characters long.
+line_length:
+  warning: 110
+  error: 130
+  ignores_urls: true
+  ignores_comments: false
+  ignores_function_declarations: false
+  ignores_interpolated_strings: false
+
+# A documented file is a long file. Eleven files trip the stock 400-line warning on doc comments alone,
+# so comment-only lines are discounted before the length is judged — otherwise this rule and CLAUDE.md's
+# rule 1 are in direct opposition.
+file_length:
+  warning: 500
+  error: 1200
+  ignore_comment_only_lines: true
+
+# Same reasoning, but this rule has no ignore_comment_only_lines option, so the threshold absorbs it.
+type_body_length:
+  warning: 400
+  error: 600
+
+function_body_length:
+  warning: 60
+  error: 120
+
+# Six, because WebDAVDownload.stream and WebDAVUpload.send genuinely need six: a request, the path it is
+# about, a range flag, a session configuration, the credentials to survive a redirect, and who decides
+# about an untrusted certificate. Bundling them into a struct would hide the list, not shorten it.
+function_parameter_count:
+  warning: 6
+  error: 8
+
+# Length checking off, casing checking on. The names it otherwise rejects are all correct: `s3` is the
+# project's word for the backend, rsaSHA2_256/rsaSHA2_512 are named by RFC 8332, and `l`/`r` in
+# RemotePath's comparison operator are the conventional names for the two sides of a comparison.
+identifier_name:
+  min_length:
+    warning: 1
+    error: 0
+  allowed_symbols: ["_"]
+
+# Test fixtures are naturally tables of three or four columns.
+large_tuple:
+  warning: 3
+  error: 5
+
+nesting:
+  type_level:
+    warning: 2
+
+# Access control first. SwiftLint's stock order wants `nonisolated public`, but the engine writes
+# `public nonisolated` in all 15 places it appears, and so does the standard library. The rule is kept
+# for what it is actually good at — catching `static public` and the like.
+modifier_order:
+  preferred_modifier_order:
+    - acl
+    - setterACL
+    - override
+    - dynamic
+    - mutators
+    - lazy
+    - final
+    - required
+    - convenience
+    - typeMethods
+    - owned
+
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+
+# docs/style.md: every file opens with its own name and the target it belongs to. All 133 files already
+# do; this keeps it true. SWIFTLINT_CURRENT_FILENAME is substituted per file before matching.
+file_header:
+  required_pattern: '\/\/\n\/\/  SWIFTLINT_CURRENT_FILENAME\n\/\/  \w+\n\/\/'
+
+# A force unwrap is a crash the compiler warned you about. There are none today.
+force_unwrapping:
+  severity: error
+
+reporter: "xcode"
