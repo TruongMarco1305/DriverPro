@@ -46,7 +46,7 @@ struct PrivateKeyLocatorTests {
         "",
         "just some text",
         "ssh-ed25519 AAAAC3Nz… user@host",          // a *public* key
-        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
     ])
     func rejectsNonKeys(_ contents: String) {
         #expect(PrivateKeyLocator.inspect(contents: contents, at: anyURL) == nil)
@@ -124,7 +124,7 @@ struct PrivateKeyLocatorTests {
         ("ssh-rsa", "Ed25519"),
         ("ecdsa-sha2-nistp256", "ssh-agent"),
         ("ssh-dss", "obsolete"),
-        ("sk-ssh-ed25519@openssh.com", "Hardware")
+        ("sk-ssh-ed25519@openssh.com", "Hardware"),
     ])
     func unsupportedAlgorithmsExplainThemselves(algorithm: String, expectedAdvice: String) throws {
         // The RSA case is the one that matters in practice: `id_rsa` is still the most common key on older
@@ -234,7 +234,7 @@ struct PrivateKeyLocatorTests {
         "ssh-rsa AAAAB3Nz user@host",
         "ecdsa-sha2-nistp256 AAAAE2Vj user@host",
         "sk-ssh-ed25519@openssh.com AAAAGnNr user@host",
-        "ssh-ed25519 AAAAC3Nz"                              // a comment is optional
+        "ssh-ed25519 AAAAC3Nz",                              // a comment is optional
     ])
     func detectsPublicKeyLines(_ line: String) {
         #expect(PrivateKeyLocator.isPublicKey(contents: line))

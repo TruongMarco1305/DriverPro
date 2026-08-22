@@ -250,7 +250,7 @@ struct FileOperationTests {
     }
 
     @Test("The chosen policy reaches the transfer", arguments: [
-        OverwritePolicy.overwrite, .skip, .rename, .resume
+        OverwritePolicy.overwrite, .skip, .rename, .resume,
     ])
     func policyIsCarried(_ policy: OverwritePolicy) async throws {
         let (model, _) = try await makeBrowser()

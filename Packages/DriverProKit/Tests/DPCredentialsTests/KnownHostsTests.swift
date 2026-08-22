@@ -110,7 +110,7 @@ struct KnownHostsEntryTests {
         "example.com ssh-ed25519",                      // no base64
         "example.com ssh-ed25519 !!!not-base64!!!",     // undecodable
         "@bogus example.com ssh-ed25519 AAAA",          // unknown marker
-        "|1|onlyonepart ssh-ed25519 AAAA"               // truncated hash
+        "|1|onlyonepart ssh-ed25519 AAAA",               // truncated hash
     ])
     func skipsMalformedLines(_ line: String) {
         // One bad line written by some other tool must not make the whole file unreadable and lock the

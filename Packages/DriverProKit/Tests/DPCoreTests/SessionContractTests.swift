@@ -18,7 +18,7 @@ struct SessionCapabilitiesTests {
         let all: [SessionCapabilities] = [
             .rename, .serverSideCopy, .emptyDirectories, .recursiveDelete, .symbolicLinks,
             .posixPermissions, .timestamps, .ownership, .versioning, .quota,
-            .resumeDownload, .resumeUpload, .segmentedTransfer, .checksum
+            .resumeDownload, .resumeUpload, .segmentedTransfer, .checksum,
         ]
         #expect(Set(all.map(\.rawValue)).count == all.count)
 

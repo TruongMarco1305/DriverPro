@@ -19,6 +19,7 @@ struct SilentPrompt: UserPrompt {
     func askHostKey(_ challenge: HostKeyChallenge, for host: RemoteHost) async -> HostKeyDecision {
         hostKeyDecision
     }
+
     func askCredentials(_ request: CredentialRequest) async -> Credentials? { credentials }
 }
 

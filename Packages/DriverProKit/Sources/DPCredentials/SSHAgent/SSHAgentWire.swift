@@ -199,7 +199,7 @@ extension Data {
             UInt8(truncatingIfNeeded: value >> 24),
             UInt8(truncatingIfNeeded: value >> 16),
             UInt8(truncatingIfNeeded: value >> 8),
-            UInt8(truncatingIfNeeded: value)
+            UInt8(truncatingIfNeeded: value),
         ])
     }
 

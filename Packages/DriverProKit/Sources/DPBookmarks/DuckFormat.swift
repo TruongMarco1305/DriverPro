@@ -48,7 +48,7 @@ public enum DuckFormat {
     /// Mapping it would silently strip that alias and break the key for them.
     private static let mappedKeys: Set<String> = [
         "Protocol", "Hostname", "Port", "Username", "Path", "Nickname", "UUID", "Comment",
-        driverProDefaultPathKey
+        driverProDefaultPathKey,
     ]
 
     /// Where a WebDAV bookmark's *browsing* start point goes, since `Path` is carrying its DAV root.
@@ -103,7 +103,7 @@ public enum DuckFormat {
         .sftp: "sftp",
         .webdav: "davs",
         .s3: "s3",
-        .ftp: "ftp"
+        .ftp: "ftp",
     ]
 
     /// Every identifier accepted on import, including the ones with two spellings.
@@ -111,7 +111,7 @@ public enum DuckFormat {
         "sftp": .sftp,
         "dav": .webdav, "davs": .webdav,
         "s3": .s3,
-        "ftp": .ftp, "ftps": .ftp
+        "ftp": .ftp, "ftps": .ftp,
     ]
 
     // MARK: - Decoding

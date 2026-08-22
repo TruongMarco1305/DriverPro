@@ -101,8 +101,8 @@ public actor BookmarkStore {
                 updated_at   REAL NOT NULL
             )
             """,
-            "CREATE INDEX bookmark_hostname ON bookmark (hostname)"
-        ])
+            "CREATE INDEX bookmark_hostname ON bookmark (hostname)",
+        ]),
     ]
 
     /// The default location of the database file.
@@ -186,7 +186,7 @@ public actor BookmarkStore {
                 SQLValue(host.comment),
                 SQLValue(properties),
                 SQLValue(now),
-                SQLValue(now)
+                SQLValue(now),
             ]
         )
     }

@@ -20,7 +20,7 @@ struct SFTPAttributeMappingTests {
     @Test("File type is read from the high bits of the mode", arguments: [
         (mode: UInt32(0o040755), expected: RemoteItem.Kind.directory),
         (mode: UInt32(0o100644), expected: RemoteItem.Kind.file),
-        (mode: UInt32(0o120777), expected: RemoteItem.Kind.symbolicLink(target: nil))
+        (mode: UInt32(0o120777), expected: RemoteItem.Kind.symbolicLink(target: nil)),
     ])
     func mapsFileTypeBits(_ testCase: (mode: UInt32, expected: RemoteItem.Kind)) {
         // SFTP packs type and permissions into one UInt32: 0o040755 is "directory, mode 755". Reading

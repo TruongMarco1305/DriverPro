@@ -102,8 +102,8 @@ public actor SQLiteTransferJournal: TransferJournal {
                 updated_at  REAL NOT NULL
             )
             """,
-            "CREATE INDEX transfer_host ON transfer (host_id)"
-        ])
+            "CREATE INDEX transfer_host ON transfer (host_id)",
+        ]),
     ]
 
     /// Creates a journal over an open database.
@@ -139,7 +139,7 @@ public actor SQLiteTransferJournal: TransferJournal {
             """,
             [
                 SQLValue(transfer.id), SQLValue(transfer.host.id), SQLValue(title),
-                SQLValue(String(decoding: payload, as: UTF8.self)), SQLValue(now), SQLValue(now)
+                SQLValue(String(decoding: payload, as: UTF8.self)), SQLValue(now), SQLValue(now),
             ]
         )
     }
@@ -158,7 +158,7 @@ public actor SQLiteTransferJournal: TransferJournal {
             """,
             [
                 SQLValue(report.transferred), SQLValue(report.skipped), SQLValue(report.failed),
-                .integer(report.bytes), SQLValue(Date()), SQLValue(id)
+                .integer(report.bytes), SQLValue(Date()), SQLValue(id),
             ]
         )
     }

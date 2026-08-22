@@ -57,7 +57,7 @@ public actor SFTPSession: Session {
         .timestamps,
         .ownership,
         .resumeDownload,
-        .resumeUpload
+        .resumeUpload,
     ]
 
     // MARK: - Configuration

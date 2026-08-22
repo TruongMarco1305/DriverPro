@@ -126,9 +126,11 @@ class WebDAVConnectionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sen
         }
 
         func deliver(_ accepted: Bool) {
-            accepted
-                ? handler(.useCredential, credential)
-                : handler(.cancelAuthenticationChallenge, nil)
+            if accepted {
+                handler(.useCredential, credential)
+            } else {
+                handler(.cancelAuthenticationChallenge, nil)
+            }
         }
     }
 

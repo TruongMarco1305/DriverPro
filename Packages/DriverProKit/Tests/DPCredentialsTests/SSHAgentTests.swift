@@ -206,7 +206,7 @@ struct UnixSocketAgentTransportTests {
         // No pooled descriptor means no shared mutable state and no lock. `ssh` reconnects per operation
         // too, and agents are built for it.
         let agent = try FakeSSHAgent(behaviour: .replies([
-            SSHAgentFixtures.identitiesAnswer, SSHAgentFixtures.signResponse
+            SSHAgentFixtures.identitiesAnswer, SSHAgentFixtures.signResponse,
         ]))
         defer { agent.stop() }
 

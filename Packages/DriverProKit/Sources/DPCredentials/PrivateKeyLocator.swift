@@ -117,7 +117,7 @@ public struct PrivateKeyLocator: Sendable {
     /// Ordering matters: it is the order the key picker offers them in, and Ed25519 should be the
     /// default suggestion over RSA.
     public static let conventionalNames = [
-        "id_ed25519", "id_ecdsa_sk", "id_ed25519_sk", "id_ecdsa", "id_rsa", "id_dsa"
+        "id_ed25519", "id_ecdsa_sk", "id_ed25519_sk", "id_ecdsa", "id_rsa", "id_dsa",
     ]
 
     // MARK: - Discovery

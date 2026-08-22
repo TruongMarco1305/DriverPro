@@ -29,7 +29,7 @@ struct RemotePathTests {
         "var/www",
         "/var/./www",
         "/var/log/../www",
-        "/var/www/x/.."
+        "/var/www/x/..",
     ])
     func normalisesEquivalentSpellings(_ input: String) {
         #expect(RemotePath(input).pathString == "/var/www")

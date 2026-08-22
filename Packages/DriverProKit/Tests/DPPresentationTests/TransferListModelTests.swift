@@ -125,7 +125,7 @@ struct TransferListModelTests {
             .itemStarted(item),
             .itemProgress(item, bytes: 100),
             .itemFinished(item, .transferred(bytes: 100)),
-            .finished(TransferReport(transferred: 1, bytes: 100))
+            .finished(TransferReport(transferred: 1, bytes: 100)),
         ]), id: id, title: "a.txt", isDownload: true, connection: "Work")
 
         try await waitForFinish(model, id: id)
@@ -245,7 +245,7 @@ struct TransferListModelTests {
         model.consume(stream([
             .itemStarted(item),
             .itemFinished(item, .failed(.notFound(item.remote))),
-            .finished(TransferReport(failed: 1))
+            .finished(TransferReport(failed: 1)),
         ]), id: id, title: "gone.txt", isDownload: true)
 
         try await waitForFinish(model, id: id)
@@ -267,7 +267,7 @@ struct TransferListModelTests {
 
         model.consume(stream([
             .planned(items: 0, bytes: 0),
-            .finished(TransferReport(failure: .unreachable(host: "example.com", reason: "refused")))
+            .finished(TransferReport(failure: .unreachable(host: "example.com", reason: "refused"))),
         ]), id: id, title: "batch", isDownload: true)
         try await waitForFinish(model, id: id)
 

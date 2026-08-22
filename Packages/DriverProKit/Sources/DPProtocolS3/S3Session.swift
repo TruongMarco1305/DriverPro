@@ -46,7 +46,7 @@ public actor S3Session: Session {
     ///   multipart upload it is a composite of the parts' hashes and matches nothing you can compute
     ///   locally. A checksum that is right sometimes is worse than none.
     public nonisolated let capabilities: SessionCapabilities = [
-        .serverSideCopy, .emptyDirectories, .recursiveDelete, .resumeDownload
+        .serverSideCopy, .emptyDirectories, .recursiveDelete, .resumeDownload,
     ]
 
     /// Creates a session for a bookmark.

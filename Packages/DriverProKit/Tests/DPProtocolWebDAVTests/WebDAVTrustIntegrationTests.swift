@@ -277,7 +277,7 @@ struct WebDAVTrustIntegrationTests {
             // certificate for, `s_client` produces nothing, and the second command reports a confusing
             // PEM error rather than saying the connection failed.
             "echo | openssl s_client -connect localhost:\(WebDAVTLSConfig.port) -servername localhost "
-            + "2>/dev/null | openssl x509 -noout -fingerprint -sha256"
+            + "2>/dev/null | openssl x509 -noout -fingerprint -sha256",
         ]
 
         let output = Pipe()

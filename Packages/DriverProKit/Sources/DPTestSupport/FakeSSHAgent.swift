@@ -249,7 +249,7 @@ public enum SSHAgentWireFraming {
             UInt8(truncatingIfNeeded: count >> 24),
             UInt8(truncatingIfNeeded: count >> 16),
             UInt8(truncatingIfNeeded: count >> 8),
-            UInt8(truncatingIfNeeded: count)
+            UInt8(truncatingIfNeeded: count),
         ])
         message.append(payload)
         return message

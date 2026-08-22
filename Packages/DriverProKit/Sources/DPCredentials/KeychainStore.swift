@@ -195,7 +195,7 @@ public actor KeychainStore {
             kSecAttrServer as String: host.hostname,
             kSecAttrPort as String: host.port,
             kSecAttrProtocol as String: Self.protocolAttribute(for: host.protocolIdentifier),
-            kSecAttrAccount as String: host.keychainAccount
+            kSecAttrAccount as String: host.keychainAccount,
         ]
     }
 
@@ -204,7 +204,7 @@ public actor KeychainStore {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "\(serviceLabelPrefix) SSH key passphrase",
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
         ]
     }
 

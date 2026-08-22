@@ -86,8 +86,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         return answers.isEmpty ? Response(status: 500) : answers.removeFirst()
     }
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let answer = Self.next(for: request)
@@ -276,7 +276,7 @@ struct WebDAVSessionTests {
     func existsAnswers() async throws {
         let session = try await connected(then: [
             .init(status: 207, body: MultiStatusFixture.apacheListing),
-            .init(status: 404)
+            .init(status: 404),
         ])
 
         #expect(await session.exists(RemotePath("/srv")))

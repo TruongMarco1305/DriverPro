@@ -52,7 +52,7 @@ struct SFTPAuthenticationOfferTests {
         let delegate = SFTPAuthenticationDelegate(username: "duck", offers: [
             .key(anyKey(), label: "agent key one"),
             .key(anyKey(), label: "agent key two"),
-            .password("hunter2")
+            .password("hunter2"),
         ])
 
         #expect(nextLabel(from: delegate) == "agent key one")
@@ -90,7 +90,7 @@ struct SFTPAuthenticationOfferTests {
         // default, so sending a password to a keys-only server wastes a slot and reports nothing useful.
         let delegate = SFTPAuthenticationDelegate(username: "duck", offers: [
             .password("hunter2"),
-            .key(anyKey(), label: "agent key")
+            .key(anyKey(), label: "agent key"),
         ])
 
         #expect(nextLabel(from: delegate, available: .publicKey) == "agent key")
@@ -167,7 +167,7 @@ struct PreparedAuthenticationTests {
         let loop = EmbeddedEventLoop()
         let chain = SFTPAuthenticationDelegate(username: "duck", offers: [
             .key(NIOSSHPrivateKey(ed25519Key: Curve25519.Signing.PrivateKey()), label: "agent key one"),
-            .password("hunter2")
+            .password("hunter2"),
         ])
         // Spend both offers, so the chain has a record to report.
         for _ in 0..<2 {

@@ -146,7 +146,7 @@ public struct ProtocolCatalog: Sendable {
             // SFTP happens to have.
             authentications: [.password],
             iconName: "cloud"
-        )
+        ),
     ])
 
     /// Every protocol this build can connect with.
@@ -187,7 +187,7 @@ public struct ProtocolCatalog: Sendable {
                 guard let session = WebDAVSession(host: host, trustedCertificates: trustedCertificates)
                 else { throw SessionError.unreachable(host: host.hostname, reason: "not a valid address") }
                 return session
-            }
+            },
         ])
     }
 }

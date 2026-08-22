@@ -14,7 +14,7 @@ import PackageDescription
 /// from the first commit deliberately — retrofitting concurrency correctness later is far more painful
 /// than starting with it, and the compiler teaches you the rules as you go.
 let swiftSettings: [SwiftSetting] = [
-    .swiftLanguageMode(.v6)
+    .swiftLanguageMode(.v6),
 ]
 
 let package = Package(
@@ -35,7 +35,7 @@ let package = Package(
         .library(name: "DPBookmarks", targets: ["DPBookmarks"]),
         .library(name: "DPTransfer", targets: ["DPTransfer"]),
         .library(name: "DPServices", targets: ["DPServices"]),
-        .library(name: "DPPresentation", targets: ["DPPresentation"])
+        .library(name: "DPPresentation", targets: ["DPPresentation"]),
     ],
 
     dependencies: [
@@ -53,7 +53,7 @@ let package = Package(
 
         // Soto's transport, depended on directly so `DPProtocolS3` can configure it. The version is the
         // one Soto resolves to; naming it here does not change the graph, it only makes the import legal.
-        .package(url: "https://github.com/swift-server/async-http-client.git", exact: "1.36.0")
+        .package(url: "https://github.com/swift-server/async-http-client.git", exact: "1.36.0"),
     ],
 
     targets: [
@@ -95,7 +95,7 @@ let package = Package(
             dependencies: [
                 "DPCore",
                 "DPCredentials",
-                .product(name: "Citadel", package: "Citadel")
+                .product(name: "Citadel", package: "Citadel"),
             ],
             swiftSettings: swiftSettings
         ),
@@ -119,7 +119,7 @@ let package = Package(
                 // Declared explicitly although Soto already brings it: this target configures the HTTP
                 // client rather than taking Soto's default, because that default is a *browser-like*
                 // one. See `S3Client.httpClient`.
-                .product(name: "AsyncHTTPClient", package: "async-http-client")
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
             ],
             swiftSettings: swiftSettings
         ),
@@ -208,6 +208,6 @@ let package = Package(
             dependencies: ["DPProtocolSFTP", "DPCore", "DPCredentials", "DPTestSupport", "DPTransfer",
                            "DPServices", "DPBookmarks", "DPDatabase"],
             swiftSettings: swiftSettings
-        )
+        ),
     ]
 )

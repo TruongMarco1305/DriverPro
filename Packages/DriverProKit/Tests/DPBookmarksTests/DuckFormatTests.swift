@@ -196,7 +196,7 @@ struct DuckDecodingTests {
         #expect(decode(DuckFixture.realFTPProfile) == .unsupported(.ftp))
 
         guard case .bookmark(let host) = DuckFormat.decode(DuckFixture.realFTPProfile,
-                                                          supported: [.ftp], defaultPort: 21) else {
+                                                           supported: [.ftp], defaultPort: 21) else {
             Issue.record("expected a bookmark once FTP is supported")
             return
         }
@@ -225,7 +225,7 @@ struct DuckDecodingTests {
     func realExportedBookmarkRoundTrips() throws {
         let host = try bookmark(DuckFixture.realSFTPBookmark)
         let parsed = try PropertyListSerialization.propertyList(from: DuckFormat.encode(host),
-                                                               format: nil)
+                                                                format: nil)
         let dictionary = try #require(parsed as? [String: Any])
 
         #expect(dictionary["Encoding"] as? String == "UTF-8")
@@ -301,7 +301,7 @@ struct DuckEncodingTests {
         #expect(dictionary["Path"] as? String == "/srv")
         #expect(dictionary["Nickname"] as? String == "Work")
         #expect(dictionary["Comment"] as? String == "notes")
-        #expect(dictionary["UUID"] as? String != nil)
+        #expect(dictionary["UUID"] is String)
     }
 
     @Test("Fields with nothing in them are absent, not empty")
@@ -447,7 +447,7 @@ struct DuckRoundTripTests {
         }
 
         let parsed = try PropertyListSerialization.propertyList(from: DuckFormat.encode(host),
-                                                               format: nil)
+                                                                format: nil)
         let dictionary = try #require(parsed as? [String: Any])
 
         #expect(dictionary["Timezone"] as? String == "Europe/Zurich")
@@ -468,7 +468,7 @@ struct DuckRoundTripTests {
         }
 
         let parsed = try PropertyListSerialization.propertyList(from: DuckFormat.encode(host),
-                                                               format: nil)
+                                                                format: nil)
         let dictionary = try #require(parsed as? [String: Any])
         let local = try #require(dictionary["Private Key File Dictionary"] as? [String: Any])
 
@@ -483,7 +483,7 @@ struct DuckRoundTripTests {
         original.authenticationPreference = .privateKey(path: "/Users/duck/.ssh/id_ed25519")
 
         guard case .bookmark(let restored) = DuckFormat.decode(try DuckFormat.encode(original),
-                                                              supported: [.sftp]) else {
+                                                               supported: [.sftp]) else {
             Issue.record("what we wrote, we cannot read")
             return
         }

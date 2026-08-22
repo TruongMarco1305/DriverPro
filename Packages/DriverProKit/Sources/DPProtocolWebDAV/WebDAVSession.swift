@@ -57,7 +57,7 @@ public actor WebDAVSession: Session {
     /// no standard one — so `TransferQueue` falls back to starting a file again, which is exactly what
     /// the capability set is for.
     public nonisolated let capabilities: SessionCapabilities = [
-        .rename, .serverSideCopy, .emptyDirectories, .recursiveDelete, .resumeDownload
+        .rename, .serverSideCopy, .emptyDirectories, .recursiveDelete, .resumeDownload,
     ]
 
     /// Creates a session for a bookmark.
@@ -342,7 +342,7 @@ public actor WebDAVSession: Session {
                 "Destination": paths.url(for: destination).absoluteString,
                 // Without this a rename onto an existing name silently replaces it, and the contract's
                 // promise that renaming leaves nothing behind would be true for the wrong reason.
-                "Overwrite": "F"
+                "Overwrite": "F",
             ]
         )
     }

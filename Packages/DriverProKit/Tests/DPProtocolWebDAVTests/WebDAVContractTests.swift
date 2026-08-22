@@ -140,7 +140,7 @@ struct WebDAVContractTests {
         let payloads: [String: Data] = [
             "top.txt": Data("top".utf8),
             "nested/deep.bin": Data((0..<5_000).map { UInt8($0 % 251) }),
-            "nested/deeper/leaf.txt": Data("leaf".utf8)
+            "nested/deeper/leaf.txt": Data("leaf".utf8),
         ]
 
         try await session.createDirectory(workingDirectory.appending("nested"))

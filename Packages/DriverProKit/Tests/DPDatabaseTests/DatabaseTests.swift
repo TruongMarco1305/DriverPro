@@ -17,8 +17,8 @@ private let scratchMigrations = [
             score REAL,
             data  BLOB
         )
-        """
-    ])
+        """,
+    ]),
 ]
 
 @Suite("Database")
@@ -152,7 +152,7 @@ struct DatabaseTests {
             try await database.transaction([
                 SQL("INSERT INTO thing (id) VALUES (?)", [.integer(2)]),
                 SQL("INSERT INTO thing (id) VALUES (?)", [.integer(3)]),
-                SQL("INSERT INTO thing (id) VALUES (?)", [.integer(1)])   // duplicate key
+                SQL("INSERT INTO thing (id) VALUES (?)", [.integer(1)]),   // duplicate key
             ])
         }
 
@@ -167,7 +167,7 @@ struct DatabaseTests {
         let database = try makeDatabase()
         try await database.transaction([
             SQL("INSERT INTO thing (id) VALUES (?)", [.integer(1)]),
-            SQL("INSERT INTO thing (id) VALUES (?)", [.integer(2)])
+            SQL("INSERT INTO thing (id) VALUES (?)", [.integer(2)]),
         ])
 
         #expect(try await database.rows("SELECT id FROM thing").count == 2)
@@ -182,7 +182,7 @@ struct MigrationTests {
         let database = try Database(.memory, migrations: [
             Migration(version: 1, statements: ["CREATE TABLE a (id INTEGER PRIMARY KEY)"]),
             Migration(version: 2, statements: ["CREATE TABLE b (id INTEGER PRIMARY KEY)"]),
-            Migration(version: 3, statements: ["ALTER TABLE a ADD COLUMN note TEXT"])
+            Migration(version: 3, statements: ["ALTER TABLE a ADD COLUMN note TEXT"]),
         ])
 
         #expect(try await database.schemaVersion() == 3)
@@ -197,7 +197,7 @@ struct MigrationTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let migrations = [
-            Migration(version: 1, statements: ["CREATE TABLE a (id INTEGER PRIMARY KEY)"])
+            Migration(version: 1, statements: ["CREATE TABLE a (id INTEGER PRIMARY KEY)"]),
         ]
 
         let first = try Database(.file(url), migrations: migrations)
@@ -242,7 +242,7 @@ struct MigrationTests {
         // Version 2 creates a table and then runs nonsense. Neither may survive.
         let broken = good + [Migration(version: 2, statements: [
             "CREATE TABLE b (id INTEGER PRIMARY KEY)",
-            "THIS IS NOT SQL"
+            "THIS IS NOT SQL",
         ])]
 
         #expect(throws: DatabaseError.self) {

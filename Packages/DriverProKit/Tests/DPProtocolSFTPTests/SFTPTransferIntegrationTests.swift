@@ -40,7 +40,7 @@ struct SFTPTransferIntegrationTests {
         )
         // The composition root in miniature: the only place that knows SFTP exists.
         let factory = ClosureSessionFactory([
-            .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) }
+            .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) },
         ])
         return SessionPool(
             factory: factory,
@@ -81,7 +81,7 @@ struct SFTPTransferIntegrationTests {
         let payloads: [String: Data] = [
             "README.md": Data("hello".utf8),
             "src/main.swift": Data(repeating: 0x41, count: 3000),
-            "src/deep/blob.bin": Data((0..<200_000).map { UInt8($0 % 251) })
+            "src/deep/blob.bin": Data((0..<200_000).map { UInt8($0 % 251) }),
         ]
         for (relative, data) in payloads {
             try data.write(to: project.appending(path: relative))
@@ -212,7 +212,7 @@ struct SFTPResumeIntegrationTests {
         )
         return SessionPool(
             factory: ClosureSessionFactory([
-                .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) }
+                .sftp: { host in SFTPSession(host: host, knownHosts: knownHosts) },
             ]),
             delegate: ScriptedDelegate(
                 credentials: .password(username: IntegrationConfig.user,

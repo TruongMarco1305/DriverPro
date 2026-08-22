@@ -14,7 +14,7 @@ struct POSIXPermissionsTests {
         (mode: UInt16(0o644), symbolic: "rw-r--r--", octal: "644"),
         (mode: UInt16(0o600), symbolic: "rw-------", octal: "600"),
         (mode: UInt16(0o777), symbolic: "rwxrwxrwx", octal: "777"),
-        (mode: UInt16(0o000), symbolic: "---------", octal: "000")
+        (mode: UInt16(0o000), symbolic: "---------", octal: "000"),
     ])
     func symbolicRendering(_ testCase: (mode: UInt16, symbolic: String, octal: String)) {
         let permissions = POSIXPermissions(rawValue: testCase.mode)

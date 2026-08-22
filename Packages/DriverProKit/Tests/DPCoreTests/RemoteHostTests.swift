@@ -109,7 +109,7 @@ struct CredentialsTests {
         .privateKey(data: Data("KEYBYTES".utf8), passphrase: "hunter2", path: "/tmp/k"),
         .token("hunter2"),
         .sshAgent,
-        .anonymous
+        .anonymous,
     ])
     func descriptionsAreRedacted(method: Credentials.Method) {
         let credentials = Credentials(username: "duck", method: method)

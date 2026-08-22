@@ -31,7 +31,7 @@ struct AgentKeyBlobTests {
         let count = UInt32(bytes.count)
         out.append(contentsOf: [
             UInt8(truncatingIfNeeded: count >> 24), UInt8(truncatingIfNeeded: count >> 16),
-            UInt8(truncatingIfNeeded: count >> 8), UInt8(truncatingIfNeeded: count)
+            UInt8(truncatingIfNeeded: count >> 8), UInt8(truncatingIfNeeded: count),
         ])
         out.append(bytes)
         return out
@@ -159,7 +159,7 @@ struct AgentKeyBlobTests {
         let client = SSHAgentClient(transport: StubAgentTransport(replies: []))
         let bodies: [(String, Int)] = [
             ("ssh-ed25519", 32), ("ecdsa-sha2-nistp256", 65),
-            ("ecdsa-sha2-nistp384", 97), ("ecdsa-sha2-nistp521", 133), ("ssh-rsa", 140)
+            ("ecdsa-sha2-nistp384", 97), ("ecdsa-sha2-nistp521", 133), ("ssh-rsa", 140),
         ]
 
         for (algorithm, size) in bodies {

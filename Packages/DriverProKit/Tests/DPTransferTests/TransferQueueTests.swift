@@ -117,7 +117,7 @@ struct DownloadTests {
                 sources: [
                     RemotePath("/srv/ok.txt"),
                     RemotePath("/srv/gone-a.txt"),
-                    RemotePath("/srv/gone-b.txt")
+                    RemotePath("/srv/gone-b.txt"),
                 ],
                 destination: local
             )

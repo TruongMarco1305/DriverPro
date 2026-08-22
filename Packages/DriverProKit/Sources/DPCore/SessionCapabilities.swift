@@ -115,7 +115,7 @@ public struct SessionCapabilities: OptionSet, Hashable, Sendable {
     public static let posixFileSystem: SessionCapabilities = [
         .rename, .emptyDirectories, .recursiveDelete, .symbolicLinks,
         .posixPermissions, .timestamps, .ownership,
-        .resumeDownload, .resumeUpload
+        .resumeDownload, .resumeUpload,
     ]
 }
 
@@ -141,7 +141,7 @@ extension SessionCapabilities: CustomStringConvertible {
             (.resumeDownload, "resumeDownload"),
             (.resumeUpload, "resumeUpload"),
             (.segmentedTransfer, "segmentedTransfer"),
-            (.checksum, "checksum")
+            (.checksum, "checksum"),
         ]
         let present = names.filter { contains($0.0) }.map(\.1)
         return present.isEmpty ? "[]" : "[\(present.joined(separator: ", "))]"

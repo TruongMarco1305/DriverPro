@@ -31,7 +31,7 @@ struct ConnectionFormModelTests {
             ProtocolDescriptor(id: .sftp, displayName: "SFTP", summary: "Over SSH.", scheme: "sftp",
                                defaultPort: 22, fields: [.username, .password], iconName: "server.rack"),
             ProtocolDescriptor(id: .webdav, displayName: "WebDAV", summary: "Over HTTPS.", scheme: "https",
-                               defaultPort: 443, fields: [.username, .password], iconName: "globe")
+                               defaultPort: 443, fields: [.username, .password], iconName: "globe"),
         ])
         let form = ConnectionFormModel(catalog: catalog)
         #expect(form.port == "22")

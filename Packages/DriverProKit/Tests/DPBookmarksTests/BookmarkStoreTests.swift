@@ -205,7 +205,7 @@ struct BookmarkStoreTests {
             makeHost(nickname: "One", hostname: "a.example.com"),
             makeHost(nickname: "Two", hostname: "b.example.com"),
             RemoteHost(protocolIdentifier: .webdav, hostname: "dav.example.com", port: 443,
-                       username: "u", nickname: "Three", properties: ["k": "v"])
+                       username: "u", nickname: "Three", properties: ["k": "v"]),
         ]
         for host in hosts { try await source.save(host) }
 
