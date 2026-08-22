@@ -120,3 +120,52 @@ services:
       timeout: 5s
       retries: 30
       start_period: 5s
+
+  # MinIO (M4). The S3 server that runs on a laptop — same API, none of the account, the bill, or the
+  # network. Published for arm64, so no `platform:` pin: see the architecture note in the README.
+  minio:
+    profiles: ["s3"]
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: integration-minio
+    ports:
+      - "${S3_PORT}:9000"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    # The buckets are directories. MinIO adopts every top-level directory in its data dir as a bucket, so
+    # creating them before the server starts saves a second container — and a second container is not
+    # free here: `compose up --wait` treats *any* container that exits as a failed start, even one that
+    # exited 0 having done its job. An `mc` sidecar therefore breaks the runner rather than seeding it.
+    entrypoint: >
+      sh -c "mkdir -p /data/${S3_BUCKET} /data/${S3_BUCKET}-second && exec minio server /data"
+    healthcheck:
+      # MinIO's own liveness endpoint. The buckets are already there by the time it answers, because
+      # they were made before the server was exec'd.
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+
+  # LocalStack (M4). The other S3 on a laptop, and worth having beside MinIO rather than instead of it:
+  # two implementations disagree about more than one ever admits to, and M3 learned that lesson the hard
+  # way when the contract passed against Apache and failed against Nextcloud.
+  localstack:
+    profiles: ["localstack"]
+    # Published for arm64, so no `platform:` pin — see the architecture note in the README.
+    image: localstack/localstack:4
+    container_name: integration-localstack
+    ports:
+      - "${LOCALSTACK_PORT}:4566"
+    environment:
+      # Only S3. LocalStack emulates most of AWS, and starting the rest costs time for services no test
+      # will ever call.
+      SERVICES: s3
+    healthcheck:
+      # The port answers well before S3 is usable, so check the service's own status rather than the
+      # socket — the same reason Nextcloud's healthcheck reads `status.php` instead of connecting.
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"s3\": *\"\\(available\\|running\\)\"'"]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+      start_period: 5s

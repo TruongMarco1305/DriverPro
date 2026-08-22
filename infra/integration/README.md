@@ -13,6 +13,8 @@ infra/integration/script.sh              # everything
 infra/integration/script.sh sftp         # SFTP only
 infra/integration/script.sh webdav       # the plain WebDAV server and its TLS front
 infra/integration/script.sh nextcloud    # Nextcloud only
+infra/integration/script.sh s3           # MinIO, and the buckets the S3 tests browse
+infra/integration/script.sh localstack   # LocalStack's S3, the second implementation
 ```
 
 Starts what is asked for, runs the suite, and tears it down again — including if the tests fail or you
@@ -27,6 +29,15 @@ A bare run still tests everything, which is what a release check wants. The argu
 | `sftp` | `sftp` | a second to start |
 | `webdav` | `webdav`, `webdav-tls` | a second or two |
 | `nextcloud` | `nextcloud` | most of a minute — it lays out a database on first start |
+| `s3` | `minio` | a second or two |
+| `localstack` | `localstack` | ten seconds or so — it starts its S3 service on boot |
+
+**Why S3 has two features.** MinIO and LocalStack are both "S3", and that is exactly why both are here.
+M3 learned the lesson the expensive way: the session contract passed against Apache's `mod_dav` and
+failed against Nextcloud, over a response-cache behaviour neither server documents. One implementation
+is not evidence about another, and "S3-compatible" is a family of dialects rather than a specification.
+The five real providers — AWS, GCS, R2, B2, Spaces — cannot run in Docker at all, and are covered by the
+conformance matrix in `docs/milestones/M4-acceptance.md`.
 
 **Why the split.** This began as one service, and the runner deliberately took no argument: it started
 whatever compose defined, and that was right. With four services it is not. A one-line change to the
@@ -80,7 +91,9 @@ docker exec <container> uname -m
 
 ## Adding a service
 
-M4 (S3) needs one; M3's WebDAV is already here. Three places, all in this directory:
+Three places, all in this directory — and getting only one of them is worse than getting none, because
+compose validates the **whole** file whatever profile you ask for. A half-written service breaks every
+other feature's run, not just its own:
 
 1. A service in `docker-compose.yml`, with a `profiles:` key naming its feature.
 2. Its settings in `.env`, including `<SERVICE>_HOST`, and the feature added to `COMPOSE_PROFILES`.
@@ -89,6 +102,16 @@ M4 (S3) needs one; M3's WebDAV is already here. Three places, all in this direct
 Then gate the new suite behind that `<SERVICE>_HOST` so the offline default stays offline. The runner
 still knows nothing protocol-specific: the table says which name maps to which setting, and nothing
 else about the protocol.
+
+Check the file still parses before running anything — this is the one-second version of the paragraph
+above, and it fails loudly where compose otherwise fails at `up`:
+
+```sh
+docker compose --env-file .env config -q      # silence is success
+```
+
+And write the suite *with* the service. A feature that starts a server and runs nothing reports green,
+for exactly the reason in the warning further up.
 
 ## Why the config lives in `.env`
 

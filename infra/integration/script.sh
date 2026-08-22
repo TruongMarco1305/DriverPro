@@ -6,6 +6,8 @@
 #   script.sh sftp         SFTP only
 #   script.sh webdav       the plain WebDAV server and its TLS front
 #   script.sh nextcloud    Nextcloud only
+#   script.sh s3           MinIO, and the bucket the S3 tests browse
+#   script.sh localstack   LocalStack's S3, the second implementation to check against
 #
 # The argument narrows what starts. Without one, everything runs — which is what a release check wants,
 # and what this script has always done.
@@ -27,12 +29,14 @@ set +a
 # gated on its own `<SERVICE>_HOST` being set, so unsetting the others makes them skip themselves. That
 # rule is already in the README and every suite follows it — adding S3 in M4 is a row here rather than a
 # change in logic.
-FEATURES="sftp webdav nextcloud"
+FEATURES="sftp webdav nextcloud s3 localstack"
 feature_host_variable() {
     case "$1" in
-        sftp)      echo "SFTP_HOST" ;;
-        webdav)    echo "WEBDAV_HOST" ;;
-        nextcloud) echo "NEXTCLOUD_HOST" ;;
+        sftp)       echo "SFTP_HOST" ;;
+        webdav)     echo "WEBDAV_HOST" ;;
+        nextcloud)  echo "NEXTCLOUD_HOST" ;;
+        s3)         echo "S3_HOST" ;;
+        localstack) echo "LOCALSTACK_HOST" ;;
     esac
 }
 
