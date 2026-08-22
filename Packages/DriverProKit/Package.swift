@@ -30,6 +30,7 @@ let package = Package(
         .library(name: "DPCredentials", targets: ["DPCredentials"]),
         .library(name: "DPProtocolSFTP", targets: ["DPProtocolSFTP"]),
         .library(name: "DPProtocolWebDAV", targets: ["DPProtocolWebDAV"]),
+        .library(name: "DPProtocolS3", targets: ["DPProtocolS3"]),
         .library(name: "DPDatabase", targets: ["DPDatabase"]),
         .library(name: "DPBookmarks", targets: ["DPBookmarks"]),
         .library(name: "DPTransfer", targets: ["DPTransfer"]),
@@ -43,9 +44,16 @@ let package = Package(
         //
         // Pinned exactly, not `from:`. Citadel depends on a *fork* of swift-nio-ssh, so a minor bump
         // could change the SSH transport underneath us without review. See ADR 009.
-        .package(url: "https://github.com/orlandos-nl/Citadel.git", exact: "0.12.1")
+        .package(url: "https://github.com/orlandos-nl/Citadel.git", exact: "0.12.1"),
 
-        // Soto -> DPProtocolS3 (M4)
+        // Soto's S3 client -> DPProtocolS3. Pinned exactly for the same reason as Citadel, and for one
+        // more: Soto and Citadel share swift-nio, so a minor bump here can move the transport the SSH
+        // backend is built on. See ADR 009 and the Package.resolved diff recorded in ADR 016.
+        .package(url: "https://github.com/soto-project/soto.git", exact: "7.15.0"),
+
+        // Soto's transport, depended on directly so `DPProtocolS3` can configure it. The version is the
+        // one Soto resolves to; naming it here does not change the graph, it only makes the import legal.
+        .package(url: "https://github.com/swift-server/async-http-client.git", exact: "1.36.0")
     ],
 
     targets: [
@@ -99,6 +107,28 @@ let package = Package(
             dependencies: ["DPCore", "DPCredentials"],
             swiftSettings: swiftSettings
         ),
+        // The S3 backend, and the only target allowed to import Soto. Same containment as Citadel in
+        // DPProtocolSFTP: if Soto ever has to be replaced by a hand-rolled SigV4 client, the blast
+        // radius is this directory.
+        .target(
+            name: "DPProtocolS3",
+            dependencies: [
+                "DPCore",
+                "DPCredentials",
+                .product(name: "SotoS3", package: "soto"),
+                // Declared explicitly although Soto already brings it: this target configures the HTTP
+                // client rather than taking Soto's default, because that default is a *browser-like*
+                // one. See `S3Client.httpClient`.
+                .product(name: "AsyncHTTPClient", package: "async-http-client")
+            ],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "DPProtocolS3Tests",
+            dependencies: ["DPProtocolS3", "DPCore", "DPCredentials", "DPTestSupport"],
+            swiftSettings: swiftSettings
+        ),
+
         .testTarget(
             name: "DPProtocolWebDAVTests",
             dependencies: ["DPProtocolWebDAV", "DPCore", "DPCredentials", "DPTestSupport"],
