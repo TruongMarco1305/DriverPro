@@ -151,14 +151,47 @@ public actor WebDAVSession: Session {
         )
         // Depth 0: this asks only about the root itself. Depth 1 would list the whole top directory
         // before anyone had asked to see it.
-        _ = try await transport.send(
-            .propfind,
-            to: paths.url(for: .root, isDirectory: true),
-            about: .root,
-            headers: ["Depth": "0", "Content-Type": "application/xml; charset=utf-8"],
-            body: Self.propfindBody
-        )
+        let root = paths.url(for: .root, isDirectory: true)
+        do {
+            _ = try await transport.send(
+                .propfind,
+                to: root,
+                about: .root,
+                headers: ["Depth": "0", "Content-Type": "application/xml; charset=utf-8"],
+                body: Self.propfindBody
+            )
+        } catch let error as SessionError {
+            throw Self.explaining(error, triedAt: root)
+        }
         self.transport = transport
+    }
+
+    /// Adds the address that was actually tried to a connection failure.
+    ///
+    /// A bookmark's hostname, port and DAV root are three fields that combine into one URL, and when the
+    /// combination is wrong the user is looking at the fields rather than at the result. Naming the URL
+    /// turns "check the WebDAV Path" — true but still a guessing game — into something they can compare
+    /// against what they meant to type.
+    ///
+    /// Only for failures where the address is the likely culprit. A rejected password is about the
+    /// password, and repeating the URL at someone would be noise.
+    ///
+    /// - Parameters:
+    ///   - error: What the probe threw.
+    ///   - url: Where the probe was sent.
+    /// - Returns: The error, with the address named if that helps.
+    private static func explaining(_ error: SessionError, triedAt url: URL) -> SessionError {
+        switch error {
+        case .protocolViolation(let reason):
+            .protocolViolation("\(reason)\n\nTried: \(url.absoluteString)")
+        case .notFound:
+            .protocolViolation(
+                "Nothing is published at \(url.absoluteString). Check the WebDAV Path — Nextcloud "
+                + "serves it at /remote.php/dav/files/<user>."
+            )
+        default:
+            error
+        }
     }
 
     /// Whether the server has been reached and accepted us.

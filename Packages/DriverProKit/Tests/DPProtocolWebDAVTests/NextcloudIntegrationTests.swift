@@ -80,6 +80,10 @@ struct NextcloudIntegrationTests {
         }
         #expect(reason.contains("WebDAV Path"))
         #expect(reason.contains("/remote.php/dav/files/"), "the shape of the answer, not just a scolding")
+        // Three fields combine into one URL, so naming it is what turns "check the path" from advice
+        // into something the user can compare against what they meant to type.
+        #expect(reason.contains("Tried:"), "the address actually asked for")
+        #expect(reason.contains("\(NextcloudConfig.port)"), "including the port, which is often the wrong one")
     }
 
     private func connected() async throws -> WebDAVSession {
