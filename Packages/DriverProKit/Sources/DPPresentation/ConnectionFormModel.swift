@@ -234,6 +234,18 @@ public final class ConnectionFormModel {
             return false
         }
 
+        // Required rather than optional, because the two answers are not equally likely to be right and
+        // the wrong one fails obscurely. Nextcloud publishes files at `/remote.php/dav/files/<user>` and
+        // serves its *web interface* at `/`, so an empty field reaches a real server that answers and
+        // does not speak WebDAV. Left optional, that is what a blank field quietly did.
+        //
+        // A plain server does publish at the root, and says so by typing `/` — which `WebDAVPaths`
+        // normalises back to an empty prefix. The point is that the root becomes something chosen
+        // instead of something defaulted into.
+        if shows(.basePath), basePath.trimmingCharacters(in: .whitespaces).isEmpty {
+            return false
+        }
+
         switch authentication {
         case .password:
             return !(shows(.password) && password.isEmpty && !isEditing)

@@ -202,21 +202,47 @@ struct ConnectionFormModelTests {
         #expect(reloaded.basePath == "/remote.php/dav/files/duck")
     }
 
-    @Test("A blank DAV root means the server root, not an empty property")
-    func blankBasePathIsAbsent() throws {
-        // A plain WebDAV server publishes at `/`, and an empty string in `properties` would be a value
-        // that has to be special-cased everywhere it is read.
+    @Test("A blank DAV root is not a valid WebDAV bookmark")
+    func blankBasePathIsRejected() {
+        // It used to mean "the server root", which is right for a plain server and catastrophic for a
+        // Nextcloud: that publishes files at /remote.php/dav/files/<user> and serves its *web
+        // interface* at `/`, so a blank field reached a real server that answered and did not speak
+        // WebDAV. The refusal named a field the user believed they had already set.
+        //
+        // The root is now something chosen rather than defaulted into. `/` still means the server root.
         let form = ConnectionFormModel()
         form.protocolIdentifier = .webdav
         form.hostname = "dav.example.com"
         form.password = "hunter2"
         form.basePath = "   "
 
-        #expect(try #require(form.makeHost()).properties[RemoteHost.webdavBasePathKey] == nil)
+        #expect(!form.isValid, "Connect stays disabled until the DAV root is answered")
+        #expect(form.makeHost() == nil)
     }
 
-    @Test("Clearing the DAV root on an edit removes it")
-    func clearingBasePathRemovesIt() throws {
+    @Test("A DAV root of / means the server root, and no property")
+    func slashBasePathIsTheServerRoot() throws {
+        // How a plain server is spelled now. `WebDAVPaths` trims the slashes off either end, so `/`
+        // normalises to an empty prefix — the same URL as before, arrived at deliberately.
+        let form = ConnectionFormModel()
+        form.protocolIdentifier = .webdav
+        form.hostname = "dav.example.com"
+        form.password = "hunter2"
+        form.basePath = "/"
+
+        #expect(form.isValid)
+        let host = try #require(form.makeHost())
+        #expect(host.properties[RemoteHost.webdavBasePathKey] == "/")
+
+        // And it survives a reload, so the field does not silently empty itself on an edit.
+        let reloaded = ConnectionFormModel()
+        reloaded.load(from: host)
+        #expect(reloaded.basePath == "/")
+        #expect(reloaded.isValid)
+    }
+
+    @Test("Clearing the DAV root on an edit blocks the save rather than dropping it")
+    func clearingBasePathBlocksTheSave() {
         var host = RemoteHost(protocolIdentifier: .webdav, hostname: "cloud.example.com", port: 443,
                               username: "duck")
         host.properties[RemoteHost.webdavBasePathKey] = "/remote.php/dav/files/duck"
@@ -225,7 +251,23 @@ struct ConnectionFormModelTests {
         form.load(from: host)
         form.basePath = ""
 
-        #expect(try #require(form.makeHost()).properties[RemoteHost.webdavBasePathKey] == nil)
+        // Emptying the field is how the bookmark used to break, so it must not be a saveable state.
+        #expect(!form.isValid)
+        #expect(form.makeHost() == nil)
+    }
+
+    @Test("The DAV root is required only where it is asked for")
+    func otherProtocolsAreUnaffected() {
+        // SFTP has no DAV root and no field for one. Requiring a value it never collects would make
+        // every SFTP bookmark unsaveable.
+        let form = ConnectionFormModel()
+        form.protocolIdentifier = .sftp
+        form.hostname = "example.com"
+        form.username = "duck"
+        form.password = "hunter2"
+
+        #expect(!form.shows(.basePath))
+        #expect(form.isValid)
     }
 
     @Test("Editing a WebDAV bookmark keeps properties it does not know about")
