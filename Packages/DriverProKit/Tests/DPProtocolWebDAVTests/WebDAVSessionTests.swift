@@ -456,26 +456,58 @@ struct WebDAVSessionTests {
 
         // 401 is "who are you" and 403 is "not you". Only the first is worth asking for a new password,
         // which is the difference `needsCredentials` carries.
-        #expect(WebDAVTransport.mapStatus(401, path: path).needsCredentials)
-        #expect(!WebDAVTransport.mapStatus(403, path: path).needsCredentials)
+        #expect(WebDAVTransport.mapStatus(401, path: path, method: .get).needsCredentials)
+        #expect(!WebDAVTransport.mapStatus(403, path: path, method: .get).needsCredentials)
 
-        #expect(WebDAVTransport.mapStatus(403, path: path) == .accessDenied(path))
-        #expect(WebDAVTransport.mapStatus(404, path: path) == .notFound(path))
-        #expect(WebDAVTransport.mapStatus(410, path: path) == .notFound(path))
-        #expect(WebDAVTransport.mapStatus(507, path: path) == .insufficientStorage)
+        #expect(WebDAVTransport.mapStatus(403, path: path, method: .get) == .accessDenied(path))
+        #expect(WebDAVTransport.mapStatus(404, path: path, method: .get) == .notFound(path))
+        #expect(WebDAVTransport.mapStatus(410, path: path, method: .get) == .notFound(path))
+        #expect(WebDAVTransport.mapStatus(507, path: path, method: .put) == .insufficientStorage)
     }
 
     @Test("405 on a MKCOL means it is already there, not that the verb is wrong")
     func methodNotAllowedIsAlreadyExists() {
         // "Method not allowed" is not something a user can act on; "there is already a folder called
         // that" is.
-        #expect(WebDAVTransport.mapStatus(405, path: RemotePath("/srv"))
+        #expect(WebDAVTransport.mapStatus(405, path: RemotePath("/srv"), method: .mkcol)
                 == .alreadyExists(RemotePath("/srv")))
+    }
+
+    @Test("405 on a PROPFIND says the address does not speak WebDAV, not that it exists")
+    func methodNotAllowedOnPropfindNamesTheRealProblem() {
+        // Reported from the app: connecting to a Nextcloud without its DAV root said "/ already
+        // exists." Nextcloud's web front end answers 405 to a PROPFIND, and 405 was mapped to
+        // `alreadyExists` for every verb — so the one message the user got was both meaningless and
+        // wrong. The fix they need is the WebDAV Path, so the error says so.
+        let error = WebDAVTransport.mapStatus(405, path: .root, method: .propfind)
+
+        guard case .protocolViolation(let reason) = error else {
+            Issue.record("405 on a PROPFIND should not be \(error)")
+            return
+        }
+        #expect(reason.contains("WebDAV Path"), "the message must name the field that fixes it")
+        #expect(!reason.contains("already exists"))
+    }
+
+    @Test("412 means “already there” only for the verbs that ask for that")
+    func preconditionFailedDependsOnTheVerb() {
+        let path = RemotePath("/srv")
+
+        // MKCOL and an overwrite-refusing MOVE say "only if it is not already there".
+        #expect(WebDAVTransport.mapStatus(412, path: path, method: .mkcol) == .alreadyExists(path))
+        #expect(WebDAVTransport.mapStatus(412, path: path, method: .move) == .alreadyExists(path))
+
+        // A DELETE sets no such precondition, so 412 from one means the server evaluated a condition we
+        // never wrote — which is worth saying rather than guessing at.
+        guard case .protocolViolation = WebDAVTransport.mapStatus(412, path: path, method: .delete) else {
+            Issue.record("412 on a DELETE is not evidence that anything exists")
+            return
+        }
     }
 
     @Test("409 means the parent is missing, which is the thing to say")
     func conflictNamesTheParent() {
-        #expect(WebDAVTransport.mapStatus(409, path: RemotePath("/srv/deep/a.txt"))
+        #expect(WebDAVTransport.mapStatus(409, path: RemotePath("/srv/deep/a.txt"), method: .put)
                 == .notFound(RemotePath("/srv/deep")))
     }
 

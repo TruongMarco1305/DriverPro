@@ -51,6 +51,37 @@ struct NextcloudIntegrationTests {
         return host
     }
 
+    @Test("Connecting without the DAV root says what is wrong, and names the field that fixes it")
+    func missingDavRootIsExplained() async throws {
+        // Reported from the app: connecting to a local Nextcloud answered "/ already exists."
+        //
+        // Nextcloud's web front end answers 405 to a PROPFIND, and 405 was mapped to `alreadyExists`
+        // whatever the verb — so leaving the WebDAV Path empty produced a message that was meaningless
+        // and, worse, described a state that was not true. The field is easy to leave blank because its
+        // placeholder shows the shape of the answer and reads like a value already filled in.
+        var host = makeHost()
+        host.properties.removeValue(forKey: RemoteHost.webdavBasePathKey)
+
+        let session = try #require(WebDAVSession(host: host))
+        var caught: (any Error)?
+        do {
+            try await session.connect(
+                credentials: .password(username: NextcloudConfig.user,
+                                       password: NextcloudConfig.password),
+                delegate: ScriptedDelegate()
+            )
+        } catch {
+            caught = error
+        }
+
+        guard case .protocolViolation(let reason)? = caught as? SessionError else {
+            Issue.record("expected a protocol violation naming the DAV root, got \(caught as Any)")
+            return
+        }
+        #expect(reason.contains("WebDAV Path"))
+        #expect(reason.contains("/remote.php/dav/files/"), "the shape of the answer, not just a scolding")
+    }
+
     private func connected() async throws -> WebDAVSession {
         let session = try #require(WebDAVSession(host: makeHost()))
         try await session.connect(

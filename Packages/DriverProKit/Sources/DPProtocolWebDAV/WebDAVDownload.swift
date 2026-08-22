@@ -131,7 +131,7 @@ final class WebDAVDownload: WebDAVConnectionDelegate, URLSessionDataDelegate {
             return
         }
         guard (200..<300).contains(http.statusCode) else {
-            buffer.finish(throwing: WebDAVTransport.mapStatus(http.statusCode, path: path))
+            buffer.finish(throwing: WebDAVTransport.mapStatus(http.statusCode, path: path, method: .get))
             completionHandler(.cancel)
             return
         }

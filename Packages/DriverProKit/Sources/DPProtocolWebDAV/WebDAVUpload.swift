@@ -82,7 +82,7 @@ enum WebDAVUpload {
                 throw SessionError.protocolViolation("The server did not answer with HTTP.")
             }
             guard (200..<300).contains(http.statusCode) else {
-                throw WebDAVTransport.mapStatus(http.statusCode, path: path)
+                throw WebDAVTransport.mapStatus(http.statusCode, path: path, method: .put)
             }
 
             // One reason to override a success: the *source* failed. A local file that became

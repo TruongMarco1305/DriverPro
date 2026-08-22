@@ -128,7 +128,7 @@ struct WebDAVTransport: Sendable {
             throw SessionError.protocolViolation("The server did not answer with HTTP.")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw Self.mapStatus(http.statusCode, path: path)
+            throw Self.mapStatus(http.statusCode, path: path, method: method)
         }
         return (data, http)
     }
@@ -137,11 +137,19 @@ struct WebDAVTransport: Sendable {
 
     /// What an HTTP status means for a file operation.
     ///
-    /// The interesting ones are 405 and 409, which say different things depending on the verb — `MKCOL`
-    /// answers 405 for "already there", while a `PUT` to a path whose parent is missing answers 409.
-    /// Both are mapped to the error that names the actual problem, because "method not allowed" is not
-    /// something a user can act on.
-    static func mapStatus(_ status: Int, path: RemotePath) -> SessionError {
+    /// **The verb matters**, which is why it is a parameter rather than something this could work out
+    /// from the status alone. 405 on a `MKCOL` means "there is already a folder called that"; on a
+    /// `PROPFIND` it means the URL is not a WebDAV endpoint at all, which is a completely different
+    /// problem with a completely different fix. Mapping it one way for every verb produced
+    /// *"/ already exists."* when someone pointed DriverPro at a Nextcloud without its DAV root — an
+    /// answer that is not merely unhelpful but actively misleading.
+    ///
+    /// - Parameters:
+    ///   - status: The HTTP status.
+    ///   - path: What the request was about, for the error that names it.
+    ///   - method: The verb that was sent, which decides what several statuses mean.
+    /// - Returns: The error to throw.
+    static func mapStatus(_ status: Int, path: RemotePath, method: Method) -> SessionError {
         switch status {
         case 401, 403:
             // 401 is "who are you", 403 is "not you". The first is worth retrying with new credentials
@@ -152,11 +160,20 @@ struct WebDAVTransport: Sendable {
         case 404, 410:
             .notFound(path)
         case 405:
-            .alreadyExists(path)
+            mapMethodNotAllowed(path: path, method: method)
         case 409:
             .notFound(path.parent ?? .root)
         case 412:
-            .alreadyExists(path)
+            // A precondition we set: `MKCOL` and an overwrite-refusing `MOVE` or `COPY` say "only if it
+            // is not already there", so 412 from those means it is. From anything else it means the
+            // server evaluated a condition we did not write, and saying "already exists" would be a
+            // guess dressed as a fact.
+            switch method {
+            case .mkcol, .move, .copy, .put:
+                .alreadyExists(path)
+            default:
+                .protocolViolation("The server refused the request on a condition it was not given.")
+            }
         case 423:
             .accessDenied(path)
         case 507:
@@ -165,6 +182,33 @@ struct WebDAVTransport: Sendable {
             .unsupported([], operation: "this operation")
         default:
             .transport("The server answered \(status).")
+        }
+    }
+
+    /// What a 405 means, which depends entirely on what was asked.
+    ///
+    /// - Parameters:
+    ///   - path: What the request was about.
+    ///   - method: The verb the server refused.
+    /// - Returns: The error naming the actual problem.
+    private static func mapMethodNotAllowed(path: RemotePath, method: Method) -> SessionError {
+        switch method {
+        case .mkcol:
+            // The one case where 405 is routine: RFC 4918 says a MKCOL on an existing resource answers
+            // "method not allowed", which for a user means the folder is already there.
+            .alreadyExists(path)
+
+        case .propfind:
+            // A server that answers HTTP but refuses PROPFIND is not a WebDAV endpoint. Nearly always
+            // this is a DAV root that is missing or wrong — pointing at the web front end of a
+            // Nextcloud rather than at `/remote.php/dav/files/<user>` produces exactly this.
+            .protocolViolation(
+                "This address answers, but does not speak WebDAV. Check the WebDAV Path — "
+                + "Nextcloud serves it at /remote.php/dav/files/<user>."
+            )
+
+        default:
+            .unsupported([], operation: "\(method.rawValue) at this address")
         }
     }
 
