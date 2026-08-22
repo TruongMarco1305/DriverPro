@@ -3,8 +3,8 @@
 #   swiftlint                     # check
 #   swiftlint --fix               # apply the fixes it can apply itself
 #
-# Run by Scripts/pre-commit over staged files. Warnings are printed; only error-severity violations
-# refuse a commit. See docs/decisions/018-lint-format-and-git-hooks.md for why each rule below is bent.
+# Run by Scripts/lint-and-check.sh. Warnings are printed; only error-severity violations
+# fail the check. See docs/decisions/018-lint-and-format.md for why each rule below is bent.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths
@@ -23,7 +23,7 @@ excluded:
   - DriverPro.xcodeproj
   # A package manifest, not source: it has no file header and declares no public API to document.
   # Listed under `excluded` rather than simply left out of `included`, because `included` is ignored
-  # when SwiftLint is handed explicit paths — which is exactly what Scripts/pre-commit does.
+  # when SwiftLint is handed explicit paths — which is what Scripts/lint-and-check.sh --staged does.
   - Packages/DriverProKit/Package.swift
 
 # ─────────────────────────────────────────────────────────────────────────────
