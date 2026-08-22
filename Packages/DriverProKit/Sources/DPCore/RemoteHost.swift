@@ -130,6 +130,43 @@ public struct RemoteHost: Hashable, Sendable, Codable, Identifiable {
 
     // MARK: - Derived values
 
+    /// The fields that decide *where and how* a connection is made, without the ones that do not.
+    ///
+    /// Two bookmarks with the same ``id`` are the same row in the sidebar; two with the same
+    /// `connectionIdentity` are the same conversation with a server. Those are different questions, and
+    /// conflating them is how an edited bookmark ends up still talking to the old address — a pooled
+    /// connection is keyed by identity, and an identity alone does not change when the port does.
+    ///
+    /// Deliberately excludes ``nickname``, ``comment`` and ``defaultPath``: renaming a bookmark or
+    /// changing which folder it opens at is no reason to drop a working connection.
+    /// ``authenticationPreference`` needs no entry of its own — it is derived from ``properties``.
+    public var connectionIdentity: ConnectionIdentity {
+        ConnectionIdentity(
+            protocolIdentifier: protocolIdentifier,
+            hostname: hostname,
+            port: port,
+            username: username,
+            properties: properties
+        )
+    }
+
+    /// Where and how to connect, as a value that can be compared.
+    ///
+    /// See ``RemoteHost/connectionIdentity``.
+    public struct ConnectionIdentity: Hashable, Sendable {
+        /// Which protocol is spoken.
+        public let protocolIdentifier: ProtocolIdentifier
+        /// The server's address.
+        public let hostname: String
+        /// The port dialled.
+        public let port: Int
+        /// Who to log in as, if anyone.
+        public let username: String?
+        /// The settings that shape a connection rather than describe it — a WebDAV DAV root, an
+        /// authentication choice, a private key path.
+        public let properties: [String: String]
+    }
+
     /// What to call this connection: the nickname, else the user name, else the address.
     ///
     /// The address is the last resort rather than part of the fallback, so a sidebar full of bookmarks

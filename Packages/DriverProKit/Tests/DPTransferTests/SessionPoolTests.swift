@@ -97,6 +97,47 @@ struct SessionPoolTests {
         }
     }
 
+    @Test("Editing a bookmark's settings does not reuse the old connection")
+    func editedSettingsAreNotReused() async throws {
+        // The pool is keyed by bookmark id, but a bookmark is editable. Change the port, the user name
+        // or a WebDAV DAV root and the same id now means a different server — so a reused connection
+        // would keep talking to the old address while the sidebar showed the new one. Silent, and
+        // exactly the sort of thing someone hits while getting a Nextcloud's DAV root right.
+        let factory = PerHostSessionFactory()
+        let pool = SessionPool(factory: factory, delegate: ScriptedDelegate())
+
+        var host = RemoteHost(protocolIdentifier: .webdav, hostname: "cloud.example.com", port: 443,
+                              username: "duck")
+        try await pool.withSession(for: host) { _ in }
+        #expect(factory.created == 1)
+
+        // The same bookmark, now with the DAV root it was missing.
+        host.properties[RemoteHost.webdavBasePathKey] = "/remote.php/dav/files/duck"
+        try await pool.withSession(for: host) { session in
+            #expect(session.host.properties[RemoteHost.webdavBasePathKey] == "/remote.php/dav/files/duck")
+        }
+        #expect(factory.created == 2, "the settings changed, so the connection must be rebuilt")
+    }
+
+    @Test("A cosmetic edit still reuses the connection")
+    func renamingDoesNotDropTheConnection() async throws {
+        // The other half of the rule: a nickname is not a connection setting, and dropping a working
+        // connection because someone renamed a bookmark would be its own bug.
+        let factory = PerHostSessionFactory()
+        let pool = SessionPool(factory: factory, delegate: ScriptedDelegate())
+
+        var host = RemoteHost(protocolIdentifier: .sftp, hostname: "example.com", port: 22,
+                              username: "duck", nickname: "Work")
+        try await pool.withSession(for: host) { _ in }
+
+        host.nickname = "Work – EU"
+        host.comment = "notes"
+        host.defaultPath = RemotePath("/srv")
+        try await pool.withSession(for: host) { _ in }
+
+        #expect(factory.created == 1)
+    }
+
     @Test("A protocol error keeps the connection; a dead one is discarded")
     func keepsUsableConnections() async throws {
         let session = try await TransferFixture.makeSession()

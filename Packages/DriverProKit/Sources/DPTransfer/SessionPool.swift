@@ -109,6 +109,14 @@ public actor SessionPool {
         // actor can be re-entered during it — but the slot is already reserved, so a concurrent borrower
         // cannot exceed the cap while this runs.
         while let candidate = idle[host.id]?.popLast() {
+            // The pool is keyed by bookmark, but a bookmark is editable: change the port, the user name
+            // or a WebDAV DAV root and the same id now means a different server. Reusing the old
+            // connection would keep talking to the old address while the sidebar showed the new one —
+            // silently, which is the worst way to be wrong.
+            guard candidate.host.connectionIdentity == host.connectionIdentity else {
+                await candidate.disconnect()
+                continue
+            }
             if await candidate.isConnected {
                 inUse[host.id, default: 0] += 1
                 return candidate

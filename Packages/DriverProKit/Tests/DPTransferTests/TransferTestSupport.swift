@@ -50,6 +50,30 @@ struct FailingSessionFactory: SessionFactory {
     }
 }
 
+/// A factory that builds a session *for the host it was asked about*, and counts them.
+///
+/// `CountingSessionFactory` hands back one fixed session whatever it is asked for, which is right for
+/// proving connections are reused and useless for proving they are not. Anything about a bookmark
+/// changing needs the session to carry the host it was built from.
+final class PerHostSessionFactory: SessionFactory, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    /// How many sessions have been created.
+    var created: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func makeSession(for host: RemoteHost) throws -> any Session {
+        lock.lock()
+        count += 1
+        lock.unlock()
+        return MemorySession(host: host)
+    }
+}
+
 // MARK: - Fixtures
 
 enum TransferFixture {
